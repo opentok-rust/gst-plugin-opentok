@@ -1,0 +1,78 @@
+[package]
+name = "gst-plugin-opentok"
+version = "0.1.0"
+authors = ["Fernando Jimenez Moreno <fjimenez@igalia.com>", "Philippe Normand <philn@igalia.com>"]
+edition = "2021"
+description = "GStreamer plugin to allow publishing and subscribing to OpenTok audio and video streams"
+repository = "https://github.com/opentok-rust/gst-plugin-opentok"
+license = "MPL-2.0"
+autoexamples = false
+
+[package.metadata.deb]
+name = "gst-plugin-opentok"
+assets = [
+  ["target/release/libgstopentok.so", "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/", "644"],
+  ["target/release/gst-opentok-helper", "/usr/bin/", "755"],
+]
+depends = "$auto,libopentok,libc++1-7"
+systemd-units = { }
+
+[lib]
+name = "gstopentok"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "gst-opentok-helper"
+path = "helper/main.rs"
+
+[dependencies]
+anyhow = "1.0.40"
+async-std = { version = "1", features = ["attributes"] }
+byte-slice-cast = "1.0.0"
+clap = { version = "3.0" }
+clap-serde = { version = "0.3", features = ["yaml"] }
+derive_more = "0.99.14"
+env_logger = "0.9.0"
+glib = "0.15"
+gst = { package = "gstreamer", version = "0.18", features = ["v1_10"] }
+gst-app = { package = "gstreamer-app", version = "0.18" }
+gst-audio = { package = "gstreamer-audio", version = "0.18" }
+gst-base = { package = "gstreamer-base", version = "0.18" }
+gst-video = { package = "gstreamer-video", version = "0.18" }
+ipc-channel = "0.15.0"
+log = "0.4.14"
+once_cell = "1.0"
+opentok = "1.0"
+serde = "1.0.130"
+signal-child = "1.0.3"
+signal-hook = "0.3.10"
+signal-hook-async-std = "0.2.1"
+signal-hook-registry = "1.4.0"
+thiserror = "1.0.25"
+url = "2.2"
+uuid = "0.8.2"
+yaml-rust = "0.4"
+
+[build-dependencies]
+gst-plugin-version-helper = "0.7"
+
+[dev-dependencies]
+json = "0.12"
+surf = "2"
+
+[dev-dependencies.async-std]
+features = ["attributes"]
+version = "1"
+
+[[example]]
+name = "multiple_subscribers"
+path = "examples/multiple_subscribers.rs"
+
+[[example]]
+name = "publisher"
+path = "examples/publisher.rs"
+
+[[example]]
+name = "subscriber"
+path = "examples/subscriber.rs"

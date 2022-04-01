@@ -1,0 +1,29 @@
+name: opentok-remote
+version: "0.1.0"
+about: OpenTokSrc remote container
+args:
+  - api_key:
+      long: api-key
+      help: OpenTok/Vonage API key
+      takes_value: true
+  - ipc_server:
+      long: ipc-server
+      help: Name of the main process IPC server to connect to
+      takes_value: true 
+  - session_id:
+      long: session-id
+      help: OpenTok/Vonage session ID
+      takes_value: true
+  - stream_id:
+      long: stream-id
+      help: Unique identifier of the stream we want to subscribe to
+      takes_value: true
+  - token:
+      long: token
+      help: OpenTok/Vonage session token
+      takes_value: true
+  - direction:
+      long: direction
+      help: Should the program emit or receive data
+      possible_values: [ src, sink ]
+      takes_value: true
