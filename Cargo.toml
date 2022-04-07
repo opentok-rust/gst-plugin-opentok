@@ -5,8 +5,10 @@ authors = ["Fernando Jimenez Moreno <fjimenez@igalia.com>", "Philippe Normand <p
 edition = "2021"
 description = "GStreamer plugin to allow publishing and subscribing to OpenTok audio and video streams"
 repository = "https://github.com/opentok-rust/gst-plugin-opentok"
+homepage = "https://github.com/opentok-rust/gst-plugin-opentok"
 license = "MPL-2.0"
 autoexamples = false
+readme = "README.md"
 
 [package.metadata.deb]
 name = "gst-plugin-opentok"
