@@ -297,12 +297,12 @@ impl OpenTokSink {
         sink.sync_state_with_parent().unwrap();
     }
 
-    fn ensure_publisher(&self) {
+    fn ensure_publisher(&self, element: &super::OpenTokSink) {
         if self.publisher.lock().unwrap().is_some() {
             return;
         }
 
-        gst_debug!(CAT, "Initializing publisher");
+        gst_debug!(CAT, obj: element, "Initializing publisher");
 
         // Even if we are only publishing audio for now, we need to add a video
         // capturer, in case a video pad is requested at some point.
@@ -313,9 +313,10 @@ impl OpenTokSink {
         let video_capturer_callbacks = VideoCapturerCallbacks::builder()
             .start(clone!(
                 @weak video_capturer,
-                @weak video_sink
+                @weak video_sink,
+                @weak element,
             => @default-return Ok(()), move |capturer| {
-                gst_debug!(CAT, "Video capturer ready");
+                gst_debug!(CAT, obj: &element, "Video capturer ready");
                 if let Some(ref video_sink) = *video_sink.lock().unwrap() {
                     OpenTokSink::setup_video_sink(
                         video_sink,
@@ -339,21 +340,22 @@ impl OpenTokSink {
                     settings.format = otc_format_from_gst_format(info.format());
                 }
                 Err(_) => {
-                    gst_warning!(CAT, "Invalid video caps, using default capturer settings");
+                    gst_warning!(CAT, obj: element, "Invalid video caps, using default capturer settings");
                 }
             };
         } else {
             // Ideally we should be able to create the publisher without
             // capturer, but this is not yet supported in opentok-rs.
-            gst_debug!(CAT, "No video pad, using default capturer settings");
+            gst_debug!(CAT, obj: element, "No video pad, using default capturer settings");
         }
 
         let video_capturer = VideoCapturer::new(settings, video_capturer_callbacks);
-        gst_debug!(CAT, "Video capturer created");
+        gst_debug!(CAT, obj: element, "Video capturer created");
 
         let signal_emitter = &self.signal_emitter;
         let publisher_callbacks = PublisherCallbacks::builder()
             .on_stream_created(clone!(
+                @weak element,
                 @weak credentials,
                 @weak published_stream_id,
                 @weak signal_emitter,
@@ -367,11 +369,21 @@ impl OpenTokSink {
                                   credentials.token().unwrap()
                 );
                 signal_emitter.lock().unwrap().as_ref().unwrap().emit_published_stream(&stream.id(), &url);
-                gst_info!(CAT, "Publisher stream created {}. Url {}", stream.id(), url);
+                gst_info!(CAT, obj: &element, "Publisher stream created {}. Url {}", stream.id(), url);
             }))
-            .on_error(move |_, error, _| {
-                gst_error!(CAT, "Publisher error {}", error,);
-            })
+            .on_error(clone!(
+                @weak element,
+            => move |_, error, _| {
+                gst_error!(CAT, obj: &element, "Publisher error {}", error,);
+                element.post_error_message(
+                    gst::error_msg!(
+                        gst::LibraryError::Failed,
+                        [
+                            format!("Failed to start publishing stream: {:?}", error).as_ref()
+                        ]
+                    )
+                );
+            }))
             .build();
         let publisher = Publisher::new("opentoksink", Some(video_capturer), publisher_callbacks);
 
@@ -823,7 +835,7 @@ impl ElementImpl for OpenTokSink {
 
         }
         if transition == gst::StateChange::PausedToPlaying {
-            self.ensure_publisher();
+            self.ensure_publisher(element);
         }
         let success = self.parent_change_state(element, transition)?;
         if transition == gst::StateChange::ReadyToNull {
