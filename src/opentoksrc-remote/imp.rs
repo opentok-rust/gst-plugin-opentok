@@ -63,8 +63,7 @@ impl OpenTokSrcRemote {
         self.credentials
             .lock()
             .unwrap()
-            .session_id
-            .as_ref()
+            .session_id()
             .map(|id| format!("opentok://{}", id))
     }
 
@@ -80,9 +79,9 @@ impl OpenTokSrcRemote {
         })?;
         let credentials: Credentials = url.into();
         gst_debug!(CAT, "Credentials {:?}", credentials);
-        if let Some(ref stream_id) = credentials.stream_id {
+        if let Some(ref stream_id) = credentials.stream_id() {
             if !stream_id.is_empty() {
-                self.set_stream_id(stream_id.clone())?;
+                self.set_stream_id(stream_id.to_string())?;
             }
         }
 
@@ -105,23 +104,32 @@ impl OpenTokSrcRemote {
     fn launch_child_process(
         &self,
         ipc_server_name: &str,
-        api_key: &str,
-        session_id: &str,
-        token: &str,
     ) -> Result<(), Error> {
         gst_debug!(CAT, "Spawning child process");
         let mut command = std::process::Command::new("gst-opentok-helper");
-        command
-            .arg("--api-key")
-            .arg(api_key)
-            .arg("--session-id")
-            .arg(session_id)
-            .arg("--token")
-            .arg(token)
-            .arg("--direction")
-            .arg("src")
-            .arg("--ipc-server")
-            .arg(ipc_server_name);
+
+        command.arg("--direction")
+                .arg("src")
+                .arg("--ipc-server")
+                .arg(ipc_server_name);
+
+        let credentials = self.credentials.lock().unwrap();
+        if credentials.api_key().is_some() {
+            command
+                .arg("--api-key")
+                .arg(credentials.api_key().unwrap())
+                .arg("--session-id")
+                .arg(credentials.session_id().unwrap())
+                .arg("--token")
+                .arg(credentials.token().unwrap());
+        } else {
+            command
+                .arg("--room-uri")
+                .arg(credentials.room_uri().unwrap().as_str());
+
+        }
+        drop(credentials);
+
         if let Some(stream_id) = self.stream_id.get() {
             command.arg("--stream-id").arg(stream_id);
         }
@@ -264,16 +272,13 @@ impl OpenTokSrcRemote {
     fn init(
         &self,
         element: &gst::Element,
-        api_key: &str,
-        session_id: &str,
-        token: &str,
     ) -> Result<(), Error> {
         // Spawn the child process and the auxiliary threads and hand over the
         // ipc server name.
         let (ipc_server, ipc_server_name): (IpcOneShotServer<IpcReceiver<IpcMessage>>, String) =
             IpcOneShotServer::new().map_err(|_| Error::OpenTokRemoteLaunchFailed)?;
 
-        self.launch_child_process(&ipc_server_name, api_key, session_id, token)?;
+        self.launch_child_process(&ipc_server_name)?;
 
         let child_process = self.child_process.clone();
 
@@ -437,12 +442,8 @@ impl OpenTokSrcRemote {
 
     fn maybe_init(&self, element: &gst::Element) -> Result<(), Error> {
         let credentials = self.credentials.lock().unwrap();
-        if let Some(ref api_key) = credentials.api_key {
-            if let Some(ref session_id) = credentials.session_id {
-                if let Some(ref token) = credentials.token {
-                    return self.init(element, api_key, session_id, token);
-                }
-            }
+        if credentials.is_complete() {
+            return self.init(element);
         }
         Ok(())
     }

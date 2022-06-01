@@ -116,8 +116,7 @@ impl OpenTokSinkRemote {
         self.credentials
             .lock()
             .unwrap()
-            .session_id
-            .as_ref()
+            .session_id()
             .map(|id| format!("opentok://{}", id))
     }
 
@@ -133,9 +132,9 @@ impl OpenTokSinkRemote {
         })?;
         let credentials: Credentials = url.into();
         gst_debug!(CAT, "Credentials {:?}", credentials);
-        if let Some(ref stream_id) = credentials.stream_id {
+        if let Some(ref stream_id) = credentials.stream_id() {
             if !stream_id.is_empty() {
-                self.set_stream_id(stream_id.clone())?;
+                self.set_stream_id(stream_id.to_string())?;
             }
         }
 
@@ -262,10 +261,10 @@ impl OpenTokSinkRemote {
                                     *published_stream_id.lock().unwrap() = Some(stream_id.clone());
                                     let credentials = credentials.lock().unwrap().clone();
                                     let url = format!("opentok://{}/{}?key={}&token={}",
-                                                      credentials.session_id.as_ref().unwrap(),
+                                                      credentials.session_id().unwrap(),
                                                       stream_id,
-                                                      credentials.api_key.as_ref().unwrap(),
-                                                      credentials.token.as_ref().unwrap()
+                                                      credentials.api_key().unwrap(),
+                                                      credentials.token().unwrap()
                                     );
 
                                     signal_emitter.emit_published_stream(&stream_id, &url);
@@ -285,9 +284,9 @@ impl OpenTokSinkRemote {
 
     fn maybe_init(&self, element: &gst::Element) -> Result<(), Error> {
         let credentials = self.credentials.lock().unwrap();
-        if let Some(ref api_key) = credentials.api_key {
-            if let Some(ref session_id) = credentials.session_id {
-                if let Some(ref token) = credentials.token {
+        if let Some(ref api_key) = credentials.api_key() {
+            if let Some(ref session_id) = credentials.session_id() {
+                if let Some(ref token) = credentials.token() {
                     return self.init(element, api_key, session_id, token);
                 }
             }

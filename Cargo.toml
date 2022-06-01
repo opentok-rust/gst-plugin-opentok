@@ -55,13 +55,11 @@ thiserror = "1.0.25"
 url = "2.2"
 uuid = "0.8.2"
 yaml-rust = "0.4"
+json = "0.12"
+surf = "2"
 
 [build-dependencies]
 gst-plugin-version-helper = "0.7"
-
-[dev-dependencies]
-json = "0.12"
-surf = "2"
 
 [dev-dependencies.async-std]
 features = ["attributes"]
