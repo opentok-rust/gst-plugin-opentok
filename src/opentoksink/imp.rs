@@ -8,7 +8,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::common::{
-    caps, otc_format_from_gst_format, pipe_opentok_to_gst_log, Credentials, Error,
+    caps, otc_format_from_gst_format, pipe_opentok_to_gst_log, Credentials, Error, init
 };
 
 use byte_slice_cast::*;
@@ -696,6 +696,8 @@ impl GstObjectImpl for OpenTokSink {}
 
 impl ElementImpl for OpenTokSink {
     fn metadata() -> Option<&'static gst::subclass::ElementMetadata> {
+        init();
+
         static ELEMENT_METADATA: Lazy<gst::subclass::ElementMetadata> = Lazy::new(|| {
             gst::subclass::ElementMetadata::new(
                 "OpenTok Sink",
