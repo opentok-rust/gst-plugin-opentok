@@ -299,3 +299,8 @@ pub fn pipe_opentok_to_gst_log(category: gst::DebugCategory) {
         }
     }))
 }
+
+static INIT: Once = Once::new();
+pub fn init() {
+    INIT.call_once(|| opentok::init().unwrap());
+}
