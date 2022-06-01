@@ -9,6 +9,7 @@
 
 use crate::common::{caps, gst_from_otc_format, pipe_opentok_to_gst_log, Credentials, Error};
 
+use anyhow::anyhow;
 use byte_slice_cast::*;
 use glib::subclass::prelude::*;
 use glib::{clone, ToValue};
@@ -23,6 +24,7 @@ use opentok::subscriber::{Subscriber as OpenTokSubscriber, SubscriberCallbacks};
 use opentok::video_frame::VideoFrame;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use url::Url;
 
 static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
@@ -144,6 +146,15 @@ impl State {
         element: &super::OpenTokSrc,
         location: &str,
     ) -> Result<(), glib::BoolError> {
+        if self.credentials.room_uri().is_some() {
+                return Err(glib::BoolError::new(
+                    format!("Credential already set {:?}", self.credentials),
+                    file!(),
+                    "set_location",
+                    line!(),
+                ));
+        }
+
         gst_debug!(CAT, obj: element, "Setting location to {}", location);
         let url = Url::parse(location).map_err(|err| {
             glib::BoolError::new(
@@ -155,9 +166,9 @@ impl State {
         })?;
         let credentials: Credentials = url.into();
         gst_debug!(CAT, obj: element, "Credentials {:?}", credentials);
-        if let Some(ref stream_id) = credentials.stream_id {
+        if let Some(ref stream_id) = credentials.stream_id() {
             if !stream_id.is_empty() {
-                self.set_stream_id(element, stream_id.clone());
+                self.set_stream_id(element, stream_id.to_string());
             }
         }
 
@@ -367,22 +378,18 @@ fn generate_video_pad_name(subscribers: &HashMap<String, Subscriber>) -> std::st
 }
 
 impl OpenTokSrc {
-    fn start(&self, element: &super::OpenTokSrc) -> Result<(), gst::StateChangeError> {
-        gst_debug!(CAT, obj: element, "OpenTokSrc initialization");
+    fn start(&self, element: &super::OpenTokSrc) -> Result<(), anyhow::Error> {
+        gst_error!(CAT, obj: element, "OpenTokSrc initialization");
+
+        async_std::task::block_on(
+            self.state.lock().unwrap().credentials.load(Duration::from_secs(5))
+        )?;
 
         log::enable_log(LogLevel::Error);
 
         pipe_opentok_to_gst_log(*CAT);
 
-        self.maybe_init_session(element).map_err(|error| {
-            gst_error!(
-                CAT,
-                obj: element,
-                "Failed to initialize OpenTok session: {:?}",
-                error,
-            );
-            gst::StateChangeError
-        })
+        self.maybe_init_session(element).map_err(|error| {anyhow!(error)})
     }
 
     fn stop(&self, element: &super::OpenTokSrc) -> Result<(), gst::StateChangeError> {
@@ -420,8 +427,7 @@ impl OpenTokSrc {
             .lock()
             .unwrap()
             .credentials
-            .session_id
-            .as_ref()
+            .session_id()
             .map(|id| format!("opentok://{}", id))
     }
 
@@ -568,9 +574,9 @@ impl OpenTokSrc {
 
     fn maybe_init_session(&self, element: &super::OpenTokSrc) -> Result<(), Error> {
         let credentials = self.state.lock().unwrap().credentials.clone();
-        if let Some(ref api_key) = credentials.api_key {
-            if let Some(ref session_id) = credentials.session_id {
-                if let Some(ref token) = credentials.token {
+        if let Some(ref api_key) = credentials.api_key() {
+            if let Some(ref session_id) = credentials.session_id() {
+                if let Some(ref token) = credentials.token() {
                     return self.init_session(element, api_key, session_id, token);
                 }
             }
@@ -736,6 +742,13 @@ impl ObjectImpl for OpenTokSrc {
                     None,
                     glib::ParamFlags::READWRITE,
                 ),
+                glib::ParamSpecString::new(
+                    "demo-room-uri",
+                    "Room uri of the OpenTok demo",
+                    "URI of the opentok demo room, eg. https://opentokdemo.tokbox.com/room/rust345",
+                    None,
+                    glib::ParamFlags::READWRITE,
+                ),
                 glib::ParamSpecBoolean::new(
                     "is-live",
                     "Is Live",
@@ -756,16 +769,21 @@ impl ObjectImpl for OpenTokSrc {
         value: &glib::Value,
         pspec: &glib::ParamSpec,
     ) {
+        let log_if_err_fn = |res| {
+            if let Err(err) = res {
+                gst_error!(CAT, "Got error: {:?}", err);
+            }
+        };
         let mut state = self.state.lock().unwrap();
         match pspec.name() {
             "api-key" => {
                 if let Ok(api_key) = value.get::<String>() {
-                    state.credentials.api_key = Some(api_key);
+                    log_if_err_fn(state.credentials.set_api_key(api_key));
                 }
             }
             "session-id" => {
                 if let Ok(session_id) = value.get::<String>() {
-                    state.credentials.session_id = Some(session_id);
+                    log_if_err_fn(state.credentials.set_session_id(session_id));
                 }
             }
             "stream-id" => {
@@ -775,7 +793,7 @@ impl ObjectImpl for OpenTokSrc {
             }
             "token" => {
                 if let Ok(token) = value.get::<String>() {
-                    state.credentials.token = Some(token);
+                    log_if_err_fn(state.credentials.set_token(token));
                 }
             }
             "location" => {
@@ -783,6 +801,9 @@ impl ObjectImpl for OpenTokSrc {
                 if let Err(e) = state.set_location(obj, &location) {
                     gst_error!(CAT, obj: obj, "Failed to set location: {:?}", e)
                 }
+            }
+            "demo-room-uri" => {
+                log_if_err_fn(state.credentials.set_room_uri(value.get::<String>().expect("expected a string")));
             }
             _ => unimplemented!(),
         }
@@ -792,11 +813,11 @@ impl ObjectImpl for OpenTokSrc {
         match pspec.name() {
             "api-key" => {
                 let state = self.state.lock().unwrap();
-                state.credentials.api_key.to_value()
+                state.credentials.api_key().to_value()
             }
             "session-id" => {
                 let state = self.state.lock().unwrap();
-                state.credentials.session_id.to_value()
+                state.credentials.session_id().to_value()
             }
             "stream-id" => {
                 let state = self.state.lock().unwrap();
@@ -808,9 +829,12 @@ impl ObjectImpl for OpenTokSrc {
             }
             "token" => {
                 let state = self.state.lock().unwrap();
-                state.credentials.token.to_value()
+                state.credentials.token().to_value()
             }
             "location" => self.location().to_value(),
+            "demo-room-uri" => {
+                self.state.lock().unwrap().credentials.room_uri().map(|url| url.as_str()).to_value()
+            }
             "is-live" => true.to_value(),
             _ => unimplemented!(),
         }
@@ -868,7 +892,11 @@ impl ElementImpl for OpenTokSrc {
         gst_debug!(CAT, obj: element, "Changing state {:?}", transition);
 
         if transition == gst::StateChange::NullToReady {
-            self.start(element)?;
+            self.start(element).map_err(|error| {
+                gst_error!(CAT, "Error changing state: {:?}", error);
+
+                gst::StateChangeError
+            })?;
         }
 
         let mut success = self.parent_change_state(element, transition)?;

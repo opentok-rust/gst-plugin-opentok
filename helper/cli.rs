@@ -7,12 +7,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-#[derive(Debug, Default)]
-pub struct Credentials {
-    pub api_key: String,
-    pub session_id: String,
-    pub token: String,
-}
+use gstopentok::common::Credentials;
 
 #[derive(Debug)]
 pub enum Direction {
@@ -37,19 +32,33 @@ pub async fn parse_cli() -> Option<Settings> {
 
     let mut credentials = Credentials::default();
     if let Some(api_key) = matches.value_of("api_key") {
-        credentials.api_key = api_key.into();
+        credentials.set_api_key(api_key.into()).unwrap();
+
     }
     if let Some(session_id) = matches.value_of("session_id") {
-        credentials.session_id = session_id.into();
+        credentials.set_session_id(session_id.into()).unwrap();
     }
     if let Some(token) = matches.value_of("token") {
-        credentials.token = token.into();
+        credentials.set_token(token.into()).unwrap();
+    }
+    if let Some(room_uri) = matches.value_of("room_uri") {
+        if let Err(err) = credentials.set_room_uri(room_uri.into()) {
+            eprintln!("{:?}", err);
+            app.print_help().unwrap();
+            return None;
+        }
     }
 
-    if credentials.api_key.is_empty()
-        || credentials.session_id.is_empty()
-        || credentials.token.is_empty()
+    if !credentials.is_complete()
     {
+        app.print_help().unwrap();
+        return None;
+    }
+
+    if let Err(err) = async_std::task::block_on(
+        credentials.load(std::time::Duration::from_secs(5))
+    ) {
+        eprintln!("could not load credentials: {:?}", err);
         app.print_help().unwrap();
         return None;
     }

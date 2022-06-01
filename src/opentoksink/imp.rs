@@ -26,6 +26,7 @@ use opentok::video_capturer::{VideoCapturer, VideoCapturerCallbacks, VideoCaptur
 use opentok::video_frame::VideoFrame;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use url::Url;
 
 static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
@@ -109,8 +110,7 @@ impl OpenTokSink {
         self.credentials
             .lock()
             .unwrap()
-            .session_id
-            .as_ref()
+            .session_id()
             .map(|id| format!("opentok://{}", id))
     }
 
@@ -189,9 +189,9 @@ impl OpenTokSink {
     fn maybe_init_session(&self, element: &gst::Element) -> Result<(), Error> {
         gst_debug!(CAT, "Maybe init session");
         let credentials = self.credentials.lock().unwrap().clone();
-        if let Some(ref api_key) = credentials.api_key {
-            if let Some(ref session_id) = credentials.session_id {
-                if let Some(ref token) = credentials.token {
+        if let Some(ref api_key) = credentials.api_key() {
+            if let Some(ref session_id) = credentials.session_id() {
+                if let Some(ref token) = credentials.token() {
                     return self.init_session(element, api_key, session_id, token);
                 }
             }
@@ -361,10 +361,10 @@ impl OpenTokSink {
                 *published_stream_id.lock().unwrap() = Some(stream.id());
                 let credentials = credentials.lock().unwrap().clone();
                 let url = format!("opentok://{}/{}?key={}&token={}",
-                                  credentials.session_id.as_ref().unwrap(),
+                                  credentials.session_id().unwrap(),
                                   stream.id(),
-                                  credentials.api_key.as_ref().unwrap(),
-                                  credentials.token.as_ref().unwrap()
+                                  credentials.api_key().unwrap(),
+                                  credentials.token().unwrap()
                 );
                 signal_emitter.lock().unwrap().as_ref().unwrap().emit_published_stream(&stream.id(), &url);
                 gst_info!(CAT, "Publisher stream created {}. Url {}", stream.id(), url);
@@ -573,7 +573,7 @@ impl ObjectImpl for OpenTokSink {
                 glib::ParamSpecString::new(
                     "location",
                     "Location",
-                    "OpenTok session location (i.e. opentok://<session id>/key=<api key>&token=<token>)",
+                    "OpenTok session location (i.e. opentok://<session id>?key=<api key>&token=<token>)",
                     None,
                     glib::ParamFlags::READWRITE,
                 ),
@@ -598,6 +598,13 @@ impl ObjectImpl for OpenTokSink {
                     None,
                     glib::ParamFlags::WRITABLE,
                 ),
+                glib::ParamSpecString::new(
+                    "demo-room-uri",
+                    "Room uri of the OpenTok demo",
+                    "URI of the opentok demo room, eg. https://opentokdemo.tokbox.com/room/rust345",
+                    None,
+                    glib::ParamFlags::READWRITE,
+                ),
             ]
         });
 
@@ -612,10 +619,16 @@ impl ObjectImpl for OpenTokSink {
         pspec: &glib::ParamSpec,
     ) {
         gst_debug!(CAT, "Set property {:?}", pspec.name());
+        let log_if_err_fn = |res| {
+            if let Err(err) = res {
+                gst_error!(CAT, "Got error: {:?} while setting {}", err, pspec.name());
+            }
+        };
+
         match pspec.name() {
             "api-key" => {
                 if let Ok(api_key) = value.get::<String>() {
-                    self.credentials.lock().unwrap().api_key = Some(api_key);
+                    log_if_err_fn(self.credentials.lock().unwrap().set_api_key(api_key));
                 }
             }
             "location" => {
@@ -626,13 +639,16 @@ impl ObjectImpl for OpenTokSink {
             }
             "session-id" => {
                 if let Ok(session_id) = value.get::<String>() {
-                    self.credentials.lock().unwrap().session_id = Some(session_id);
+                    log_if_err_fn(self.credentials.lock().unwrap().set_session_id(session_id));
                 }
             }
             "token" => {
                 if let Ok(token) = value.get::<String>() {
-                    self.credentials.lock().unwrap().token = Some(token);
+                    log_if_err_fn(self.credentials.lock().unwrap().set_token(token));
                 }
+            }
+            "demo-room-uri" => {
+                log_if_err_fn(self.credentials.lock().unwrap().set_room_uri(value.get::<String>().expect("expected a string")));
             }
             _ => unimplemented!(),
         }
@@ -650,6 +666,7 @@ impl ObjectImpl for OpenTokSink {
     fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
         match pspec.name() {
             "location" => self.location().to_value(),
+            "demo-room-uri" => self.credentials.lock().unwrap().room_uri().map(|url| url.as_str()).to_value(),
             "stream-id" => self
                 .published_stream_id
                 .lock()
@@ -784,6 +801,25 @@ impl ElementImpl for OpenTokSink {
         transition: gst::StateChange,
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
         gst_debug!(CAT, obj: element, "State changed {:?}", transition);
+        if transition == gst::StateChange::NullToReady {
+            async_std::task::block_on(
+                self.credentials.lock().unwrap().load(Duration::from_secs(5))
+            ).map_err(|error| {
+                gst_error!(CAT, "Error changing state: {:?}", error);
+
+                gst::StateChangeError
+            })?;
+
+            if let Err(e) = self.maybe_init_session(&element.clone().upcast()) {
+                gst_error!(
+                    CAT,
+                    obj: element,
+                    "Failed to initialize OpenTok session: {:?}",
+                    e
+                )
+            }
+
+        }
         if transition == gst::StateChange::PausedToPlaying {
             self.ensure_publisher();
         }
