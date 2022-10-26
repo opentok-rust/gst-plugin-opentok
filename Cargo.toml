@@ -13,7 +13,7 @@ readme = "README.md"
 [package.metadata.deb]
 name = "gst-plugin-opentok"
 assets = [
-  ["target/release/libgstopentok.so", "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/", "644"],
+  ["target/release/deps/libgstopentok.so", "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/", "644"],
   ["target/release/gst-opentok-helper", "/usr/bin/", "755"],
 ]
 depends = "$auto,libopentok,libc++1-7"
