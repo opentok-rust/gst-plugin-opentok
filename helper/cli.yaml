@@ -9,7 +9,7 @@ args:
   - ipc_server:
       long: ipc-server
       help: Name of the main process IPC server to connect to
-      takes_value: true 
+      takes_value: true
   - session_id:
       long: session-id
       help: OpenTok/Vonage session ID
@@ -26,4 +26,8 @@ args:
       long: direction
       help: Should the program emit or receive data
       possible_values: [ src, sink ]
+      takes_value: true
+  - room_uri:
+      long: room-uri
+      help: Room uri
       takes_value: true

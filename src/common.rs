@@ -125,13 +125,14 @@ impl Credentials {
 
     pub fn set_session_id(&mut self, id: String) -> Result<(), anyhow::Error> {
         ensure!(self.room_uri.is_none(), anyhow!("Can't set session_id when room_uri is set"));
-        self.api_key = Some(id);
+        self.session_id = Some(id);
+
         Ok(())
     }
 
     pub fn set_token(&mut self, token: String) -> Result<(), anyhow::Error> {
         ensure!(self.room_uri.is_none(), anyhow!("Can't set token when room_uri is set"));
-        self.api_key = Some(token);
+        self.token = Some(token);
         Ok(())
     }
 
