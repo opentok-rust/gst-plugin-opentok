@@ -51,6 +51,7 @@ pub async fn parse_cli() -> Option<Settings> {
 
     if !credentials.is_complete()
     {
+        eprintln!("===> Incomplete credentials!");
         app.print_help().unwrap();
         return None;
     }
@@ -66,6 +67,7 @@ pub async fn parse_cli() -> Option<Settings> {
     let ipc_server = match matches.value_of("ipc_server") {
         Some(name) => name.into(),
         None => {
+            eprintln!("===> No ipc_server!");
             app.print_help().unwrap();
             return None;
         }
@@ -80,6 +82,7 @@ pub async fn parse_cli() -> Option<Settings> {
             }
         }
         None => {
+            eprintln!("===> No direction set");
             app.print_help().unwrap();
             return None;
         }
