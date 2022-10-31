@@ -443,6 +443,7 @@ impl OpenTokSrcRemote {
     fn maybe_init(&self, element: &gst::Element) -> Result<(), Error> {
         let credentials = self.credentials.lock().unwrap();
         if credentials.is_complete() {
+            drop(credentials);
             return self.init(element);
         }
         Ok(())
