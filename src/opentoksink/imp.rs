@@ -8,15 +8,14 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::common::{
-    caps, otc_format_from_gst_format, pipe_opentok_to_gst_log, Credentials, Error, init
+    caps, init, otc_format_from_gst_format, pipe_opentok_to_gst_log, Credentials, Error,
 };
 
 use byte_slice_cast::*;
-use glib::subclass::prelude::*;
-use glib::{clone, ToValue};
+use gst::glib::subclass::prelude::*;
+use gst::glib::{self, clone, ToValue};
 use gst::prelude::*;
 use gst::subclass::prelude::*;
-use gst::{gst_debug, gst_error, gst_info, gst_trace, gst_warning};
 use once_cell::sync::Lazy;
 use opentok::audio_device::{AudioDevice, AudioSampleData};
 use opentok::log::{self, LogLevel};
@@ -115,7 +114,7 @@ impl OpenTokSink {
     }
 
     fn set_location(&self, location: &str) -> Result<(), glib::BoolError> {
-        gst_debug!(CAT, "Setting location to {}", location);
+        gst::debug!(CAT, "Setting location to {}", location);
         let url = match Url::parse(location) {
             Ok(url) => url,
             Err(err) => {
@@ -128,21 +127,15 @@ impl OpenTokSink {
             }
         };
         let credentials: Credentials = url.into();
-        gst_debug!(CAT, "Credentials {:?}", credentials);
+        gst::debug!(CAT, "Credentials {:?}", credentials);
         *self.credentials.lock().unwrap() = credentials;
         Ok(())
     }
 
-    fn init_session(
-        &self,
-        element: &gst::Element,
-        api_key: &str,
-        session_id: &str,
-        token: &str,
-    ) -> Result<(), Error> {
-        gst_debug!(CAT, "Init session");
+    fn init_session(&self, api_key: &str, session_id: &str, token: &str) -> Result<(), Error> {
+        gst::debug!(CAT, "Init session");
         if self.session.lock().unwrap().is_some() {
-            gst_debug!(
+            gst::debug!(
                 CAT,
                 "OpenTok is not ready yet or session already initialized"
             );
@@ -156,19 +149,19 @@ impl OpenTokSink {
                 @weak session_connected,
                 @strong publisher,
             => move |session| {
-                gst_debug!(CAT, "Session connected");
+                gst::debug!(CAT, "Session connected");
                 session_connected.store(true, Ordering::Relaxed);
                 if let Some(ref publisher) = *publisher.lock().unwrap() {
-                    gst_debug!(CAT, "Publishing on session");
+                    gst::debug!(CAT, "Publishing on session");
                     if let Err(err) = session.publish(publisher) {
-                        gst_error!(CAT, "Session publish error {}", err);
+                        gst::error!(CAT, "Session publish error {}", err);
                     }
                 }
             }))
             .on_error(clone!(
-                @weak element
+                @weak self as this
             => move |_, error, _| {
-                gst::element_error!(&element, gst::ResourceError::Read, [error]);
+                gst::element_error!(&*this.obj(), gst::ResourceError::Read, [error]);
             }))
             .build();
         match Session::new(api_key, session_id, session_callbacks) {
@@ -186,46 +179,41 @@ impl OpenTokSink {
         }
     }
 
-    fn maybe_init_session(&self, element: &gst::Element) -> Result<(), Error> {
-        gst_debug!(CAT, "Maybe init session");
+    fn maybe_init_session(&self) -> Result<(), Error> {
+        gst::debug!(CAT, "Maybe init session");
         let credentials = self.credentials.lock().unwrap().clone();
         if let Some(ref api_key) = credentials.api_key() {
             if let Some(ref session_id) = credentials.session_id() {
                 if let Some(ref token) = credentials.token() {
-                    return self.init_session(element, api_key, session_id, token);
+                    return self.init_session(api_key, session_id, token);
                 }
             }
         }
-        gst_debug!(CAT, "Not ready to init session yet");
+        gst::debug!(CAT, "Not ready to init session yet");
         Ok(())
     }
 
     fn teardown(&self) {
-        gst_debug!(CAT, "Teardown");
+        gst::debug!(CAT, "Teardown");
         if let Some(publisher) = self.publisher.lock().unwrap().as_ref() {
-            gst_debug!(CAT, "Unpublishing");
+            gst::debug!(CAT, "Unpublishing");
             if let Err(e) = publisher.unpublish() {
-                gst_error!(CAT, "Unpublish error {}", e);
+                gst::error!(CAT, "Unpublish error {}", e);
             }
         }
         if self.session_connected.load(Ordering::Relaxed) {
             if let Some(session) = self.session.lock().unwrap().as_ref() {
-                gst_debug!(CAT, "Disconnecting");
+                gst::debug!(CAT, "Disconnecting");
                 if let Err(e) = session.disconnect() {
-                    gst_error!(CAT, "Session disconnect error {}", e);
+                    gst::error!(CAT, "Session disconnect error {}", e);
                 }
             }
         }
     }
 
-    fn sink_event(
-        &self,
-        pad: &gst::GhostPad,
-        element: &super::OpenTokSink,
-        event: gst::Event,
-    ) -> bool {
+    fn sink_event(&self, pad: &gst::GhostPad, event: gst::Event) -> bool {
         use gst::EventView;
-        gst_debug!(CAT, obj: pad, "Handling event {:?}", event);
+        gst::debug!(CAT, obj: pad, "Handling event {:?}", event);
         match event.view() {
             EventView::Caps(e) => {
                 let caps = e.caps_owned();
@@ -236,14 +224,14 @@ impl OpenTokSink {
                 if s.name().starts_with("video") {
                     *self.video_caps.lock().unwrap() = Some(caps);
                 }
-                pad.event_default(Some(element), event)
+                gst::Pad::event_default(pad, Some(&*self.obj()), event)
             }
-            _ => pad.event_default(Some(element), event),
+            _ => gst::Pad::event_default(pad, Some(&*self.obj()), event),
         }
     }
 
     fn setup_video_sink(sink: &gst::Element, video_capturer: &VideoCapturer) {
-        gst_debug!(CAT, "Setting up video sink");
+        gst::debug!(CAT, "Setting up video sink");
 
         let video_capturer_ = video_capturer.clone();
         let on_new_sample =
@@ -259,9 +247,9 @@ impl OpenTokSink {
                     info.height() as i32,
                     map.to_vec(),
                 );
-                gst_trace!(CAT, "Providing frame through video capturer");
+                gst::trace!(CAT, "Providing frame through video capturer");
                 if let Err(error) = video_capturer_.provide_frame(0, &frame) {
-                    gst_error!(CAT, "Cannot provide frame to video capturer: {}", error,);
+                    gst::error!(CAT, "Cannot provide frame to video capturer: {}", error,);
                 }
                 Ok(gst::FlowSuccess::Ok)
             };
@@ -281,7 +269,7 @@ impl OpenTokSink {
                 let sample = appsink.pull_sample().unwrap();
                 let buffer = sample.buffer_owned().unwrap();
                 let map = buffer.into_mapped_buffer_readable().unwrap();
-                gst_trace!(CAT, "Providing audio sample");
+                gst::trace!(CAT, "Providing audio sample");
                 audio_device
                     .lock()
                     .unwrap()
@@ -297,12 +285,12 @@ impl OpenTokSink {
         sink.sync_state_with_parent().unwrap();
     }
 
-    fn ensure_publisher(&self, element: &super::OpenTokSink) {
+    fn ensure_publisher(&self) {
         if self.publisher.lock().unwrap().is_some() {
             return;
         }
 
-        gst_debug!(CAT, obj: element, "Initializing publisher");
+        gst::debug!(CAT, imp: self, "Initializing publisher");
 
         // Even if we are only publishing audio for now, we need to add a video
         // capturer, in case a video pad is requested at some point.
@@ -314,9 +302,9 @@ impl OpenTokSink {
             .start(clone!(
                 @weak video_capturer,
                 @weak video_sink,
-                @weak element,
+                @weak self as this,
             => @default-return Ok(()), move |capturer| {
-                gst_debug!(CAT, obj: &element, "Video capturer ready");
+                gst::debug!(CAT, imp: this, "Video capturer ready");
                 if let Some(ref video_sink) = *video_sink.lock().unwrap() {
                     OpenTokSink::setup_video_sink(
                         video_sink,
@@ -340,22 +328,30 @@ impl OpenTokSink {
                     settings.format = otc_format_from_gst_format(info.format());
                 }
                 Err(_) => {
-                    gst_warning!(CAT, obj: element, "Invalid video caps, using default capturer settings");
+                    gst::warning!(
+                        CAT,
+                        imp: self,
+                        "Invalid video caps, using default capturer settings"
+                    );
                 }
             };
         } else {
             // Ideally we should be able to create the publisher without
             // capturer, but this is not yet supported in opentok-rs.
-            gst_debug!(CAT, obj: element, "No video pad, using default capturer settings");
+            gst::debug!(
+                CAT,
+                imp: self,
+                "No video pad, using default capturer settings"
+            );
         }
 
         let video_capturer = VideoCapturer::new(settings, video_capturer_callbacks);
-        gst_debug!(CAT, obj: element, "Video capturer created");
+        gst::debug!(CAT, imp: self, "Video capturer created");
 
         let signal_emitter = &self.signal_emitter;
         let publisher_callbacks = PublisherCallbacks::builder()
             .on_stream_created(clone!(
-                @weak element,
+                @weak self as this,
                 @weak credentials,
                 @weak published_stream_id,
                 @weak signal_emitter,
@@ -369,13 +365,13 @@ impl OpenTokSink {
                                   credentials.token().unwrap()
                 );
                 signal_emitter.lock().unwrap().as_ref().unwrap().emit_published_stream(&stream.id(), &url);
-                gst_info!(CAT, obj: &element, "Publisher stream created {}. Url {}", stream.id(), url);
+                gst::info!(CAT, imp: this, "Publisher stream created {}. Url {}", stream.id(), url);
             }))
             .on_error(clone!(
-                @weak element,
+                @weak self as this,
             => move |_, error, _| {
-                gst_error!(CAT, obj: &element, "Publisher error {}", error,);
-                element.post_error_message(
+                gst::error!(CAT, imp: this, "Publisher error {}", error,);
+                this.obj().post_error_message(
                     gst::error_msg!(
                         gst::LibraryError::Failed,
                         [
@@ -390,24 +386,24 @@ impl OpenTokSink {
         if let Some(ref session) = *self.session.lock().unwrap() {
             if self.session_connected.load(Ordering::Relaxed) {
                 if let Err(err) = session.publish(&publisher) {
-                    gst_error!(CAT, "Session publish error {}", err);
+                    gst::error!(CAT, "Session publish error {}", err);
                 }
             }
         }
 
         *self.publisher.lock().unwrap() = Some(publisher);
 
-        gst_debug!(CAT, "Publisher created");
+        gst::debug!(CAT, "Publisher created");
     }
 
     fn publish_video(&self) -> Result<(), Error> {
-        gst_debug!(CAT, "Publish video");
+        gst::debug!(CAT, "Publish video");
 
         if self.audio_sink.lock().unwrap().is_none() {
-            gst_debug!(CAT, "Toggling audio off");
+            gst::debug!(CAT, "Toggling audio off");
             if let Some(ref publisher) = *self.publisher.lock().unwrap() {
                 if let Err(err) = publisher.toggle_audio(false) {
-                    gst_warning!(CAT, "Error toggling audio off {}", err);
+                    gst::warning!(CAT, "Error toggling audio off {}", err);
                 }
             }
         }
@@ -417,10 +413,10 @@ impl OpenTokSink {
                 if let Some(ref video_capturer) = *self.video_capturer.lock().unwrap() {
                     OpenTokSink::setup_video_sink(video_sink, video_capturer);
                 }
-                gst_debug!(CAT, "Toggling video on");
+                gst::debug!(CAT, "Toggling video on");
                 if let Some(ref publisher) = *self.publisher.lock().unwrap() {
                     if let Err(err) = publisher.toggle_video(true) {
-                        gst_warning!(CAT, "Error toggling video on {}", err);
+                        gst::warning!(CAT, "Error toggling video on {}", err);
                     }
                 }
             }
@@ -431,17 +427,17 @@ impl OpenTokSink {
             }
         }
 
-        gst_debug!(CAT, "Ready to publish video");
+        gst::debug!(CAT, "Ready to publish video");
         Ok(())
     }
 
     fn publish_audio(&self) -> Result<(), Error> {
-        gst_debug!(CAT, "Publish audio");
+        gst::debug!(CAT, "Publish audio");
 
         if self.video_sink.lock().unwrap().is_none() {
             if let Some(ref publisher) = *self.publisher.lock().unwrap() {
                 if let Err(err) = publisher.toggle_video(false) {
-                    gst_warning!(CAT, "Error toggling video off {}", err);
+                    gst::warning!(CAT, "Error toggling video off {}", err);
                 }
             }
         }
@@ -451,7 +447,7 @@ impl OpenTokSink {
                 OpenTokSink::setup_audio_sink(sink);
                 if let Some(ref publisher) = *self.publisher.lock().unwrap() {
                     if let Err(err) = publisher.toggle_audio(true) {
-                        gst_warning!(CAT, "Error toggling audio on {}", err);
+                        gst::warning!(CAT, "Error toggling audio on {}", err);
                     }
                 }
             }
@@ -465,14 +461,17 @@ impl OpenTokSink {
         Ok(())
     }
 
-    fn create_video_sink(&self, element: &crate::OpenTokSink) -> Result<gst::Pad, Error> {
-        let bin = element
+    fn create_video_sink(&self) -> Result<gst::Pad, Error> {
+        let bin = self
+            .obj()
             .upcast_ref::<gst::Element>()
             .clone()
             .downcast::<gst::Bin>()
             .unwrap();
 
-        let appsink = gst::ElementFactory::make("appsink", Some("video-sink"))
+        let appsink = gst::ElementFactory::make("appsink")
+            .name("video-sink")
+            .build()
             .map_err(|_| Error::MissingElement("appsink"))?;
         appsink.set_property("enable-last-sample", false);
 
@@ -485,14 +484,17 @@ impl OpenTokSink {
         Ok(target_sink_pad)
     }
 
-    fn create_audio_sink(&self, element: &crate::OpenTokSink) -> Result<gst::Pad, Error> {
-        let bin = element
+    fn create_audio_sink(&self) -> Result<gst::Pad, Error> {
+        let bin = self
+            .obj()
             .upcast_ref::<gst::Element>()
             .clone()
             .downcast::<gst::Bin>()
             .unwrap();
 
-        let appsink = gst::ElementFactory::make("appsink", Some("audio-sink"))
+        let appsink = gst::ElementFactory::make("appsink")
+            .name("audio-sink")
+            .build()
             .map_err(|_| Error::MissingElement("appsink"))?;
         appsink.set_property("enable-last-sample", false);
 
@@ -507,13 +509,12 @@ impl OpenTokSink {
 
     fn setup_sink(
         &self,
-        element: &crate::OpenTokSink,
         template: &gst::PadTemplate,
         stream_type: StreamType,
     ) -> Result<gst::Pad, Error> {
         let target_pad = match stream_type {
-            StreamType::Video => self.create_video_sink(element),
-            StreamType::Audio => self.create_audio_sink(element),
+            StreamType::Video => self.create_video_sink(),
+            StreamType::Audio => self.create_audio_sink(),
             _ => {
                 unreachable!();
             }
@@ -524,7 +525,7 @@ impl OpenTokSink {
                 OpenTokSink::catch_panic_pad_function(
                     parent,
                     || false,
-                    |sink, element| sink.sink_event(pad, element, event),
+                    |element| element.sink_event(pad, event),
                 )
             })
             .build_with_target(&target_pad)
@@ -533,7 +534,7 @@ impl OpenTokSink {
         ghost_pad
             .set_active(true)
             .map_err(|_| Error::PadActivation("sink pad"))?;
-        element.add_pad(&ghost_pad).unwrap();
+        self.obj().add_pad(&ghost_pad).unwrap();
         Ok(ghost_pad.upcast())
     }
 }
@@ -551,13 +552,14 @@ impl ObjectSubclass for OpenTokSink {
 }
 
 impl ObjectImpl for OpenTokSink {
-    fn constructed(&self, obj: &Self::Type) {
-        self.parent_constructed(obj);
+    fn constructed(&self) {
+        self.parent_constructed();
 
-        obj.set_suppressed_flags(gst::ElementFlags::SOURCE | gst::ElementFlags::SINK);
-        obj.set_element_flags(gst::ElementFlags::SINK);
+        self.obj()
+            .set_suppressed_flags(gst::ElementFlags::SOURCE | gst::ElementFlags::SINK);
+        self.obj().set_element_flags(gst::ElementFlags::SINK);
 
-        gst_debug!(CAT, obj: obj, "OpenTokSink initialization");
+        gst::debug!(CAT, imp: self, "OpenTokSink initialization");
 
         log::enable_log(LogLevel::Error);
 
@@ -567,73 +569,77 @@ impl ObjectImpl for OpenTokSink {
 
         pipe_opentok_to_gst_log(*CAT);
 
-        let element = obj.upcast_ref::<gst::Element>();
-        let element = element.downgrade();
+        let element = self.obj().upcast_ref::<gst::Element>().downgrade();
         *self.signal_emitter.lock().unwrap() = Some(SignalEmitter { element });
     }
 
     fn properties() -> &'static [glib::ParamSpec] {
         static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
             vec![
-                glib::ParamSpecString::new(
+                glib::ParamSpecString::builder(
                     "api-key",
-                    "ApiKey",
-                    "OpenTok API key",
-                    None,
+                )
+                .flags(
                     glib::ParamFlags::WRITABLE,
-                ),
-                glib::ParamSpecString::new(
-                    "location",
-                    "Location",
+                )
+                .build(),
+                glib::ParamSpecString::builder(
+                    "location")
+                .blurb(
                     "OpenTok session location (i.e. opentok://<session id>?key=<api key>&token=<token>)",
-                    None,
-                    glib::ParamFlags::READWRITE,
-                ),
-                glib::ParamSpecString::new(
-                    "session-id",
-                    "SessionId",
+                )
+                .flags(glib::ParamFlags::READWRITE)
+                .build(),
+                glib::ParamSpecString::builder(
+                    "session-id"
+                )
+                .blurb(
                     "OpenTok session unique identifier",
-                    None,
+                ).flags(
                     glib::ParamFlags::WRITABLE,
-                ),
-                glib::ParamSpecString::new(
+                )
+                .build(),
+                glib::ParamSpecString::builder(
                     "stream-id",
-                    "StreamId",
+                )
+                .blurb(
                     "Unique identifier of the OpenTok stream this sink is publishing",
-                    None,
+                )
+                .flags(
                     glib::ParamFlags::READABLE,
-                ),
-                glib::ParamSpecString::new(
-                    "token",
-                    "SessionToken",
+                )
+                .build(),
+                glib::ParamSpecString::builder(
+                    "token"
+                )
+                .blurb(
                     "OpenTok session token",
-                    None,
+                )
+                .flags(
                     glib::ParamFlags::WRITABLE,
-                ),
-                glib::ParamSpecString::new(
+                )
+                .build(),
+                glib::ParamSpecString::builder(
                     "demo-room-uri",
-                    "Room uri of the OpenTok demo",
+                )
+                .blurb(
                     "URI of the opentok demo room, eg. https://opentokdemo.tokbox.com/room/rust345",
-                    None,
+                )
+                .flags(
                     glib::ParamFlags::READWRITE,
-                ),
+                )
+                .build(),
             ]
         });
 
         PROPERTIES.as_ref()
     }
 
-    fn set_property(
-        &self,
-        obj: &Self::Type,
-        _id: usize,
-        value: &glib::Value,
-        pspec: &glib::ParamSpec,
-    ) {
-        gst_debug!(CAT, "Set property {:?}", pspec.name());
+    fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
+        gst::debug!(CAT, "Set property {:?}", pspec.name());
         let log_if_err_fn = |res| {
             if let Err(err) = res {
-                gst_error!(CAT, "Got error: {:?} while setting {}", err, pspec.name());
+                gst::error!(CAT, "Got error: {:?} while setting {}", err, pspec.name());
             }
         };
 
@@ -646,7 +652,7 @@ impl ObjectImpl for OpenTokSink {
             "location" => {
                 let location = value.get::<String>().expect("expected a string");
                 if let Err(e) = self.set_location(&location) {
-                    gst_error!(CAT, obj: obj, "Failed to set location: {:?}", e)
+                    gst::error!(CAT, imp: self, "Failed to set location: {:?}", e)
                 }
             }
             "session-id" => {
@@ -660,25 +666,35 @@ impl ObjectImpl for OpenTokSink {
                 }
             }
             "demo-room-uri" => {
-                log_if_err_fn(self.credentials.lock().unwrap().set_room_uri(value.get::<String>().expect("expected a string")));
+                log_if_err_fn(
+                    self.credentials
+                        .lock()
+                        .unwrap()
+                        .set_room_uri(value.get::<String>().expect("expected a string")),
+                );
             }
             _ => unimplemented!(),
         }
-        let element = obj.clone().upcast::<gst::Element>();
-        if let Err(e) = self.maybe_init_session(&element) {
-            gst_error!(
+        if let Err(e) = self.maybe_init_session() {
+            gst::error!(
                 CAT,
-                obj: obj,
+                imp: self,
                 "Failed to initialize OpenTok session: {:?}",
                 e
             )
         }
     }
 
-    fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+    fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
         match pspec.name() {
             "location" => self.location().to_value(),
-            "demo-room-uri" => self.credentials.lock().unwrap().room_uri().map(|url| url.as_str()).to_value(),
+            "demo-room-uri" => self
+                .credentials
+                .lock()
+                .unwrap()
+                .room_uri()
+                .map(|url| url.as_str())
+                .to_value(),
             "stream-id" => self
                 .published_stream_id
                 .lock()
@@ -692,12 +708,9 @@ impl ObjectImpl for OpenTokSink {
 
     fn signals() -> &'static [glib::subclass::Signal] {
         static SIGNALS: Lazy<Vec<glib::subclass::Signal>> = Lazy::new(|| {
-            vec![glib::subclass::Signal::builder(
-                "published-stream",
-                &[String::static_type().into(), String::static_type().into()],
-                glib::types::Type::UNIT.into(),
-            )
-            .build()]
+            vec![glib::subclass::Signal::builder("published-stream")
+                .param_types([String::static_type(), String::static_type()])
+                .build()]
         });
 
         SIGNALS.as_ref()
@@ -749,48 +762,44 @@ impl ElementImpl for OpenTokSink {
 
     fn request_new_pad(
         &self,
-        element: &Self::Type,
         template: &gst::PadTemplate,
-        _name: Option<String>,
+        _name: Option<&str>,
         _caps: Option<&gst::Caps>,
     ) -> Option<gst::Pad> {
-        let stream_type: StreamType = match template.name_template() {
-            Some(name) => name.as_str().into(),
-            None => return None,
-        };
+        let stream_type: StreamType = template.name_template().into();
 
-        gst_debug!(
+        gst::debug!(
             CAT,
-            obj: element,
+            imp: self,
             "Setting up things to publish {:?}",
             stream_type
         );
 
-        gst_debug!(CAT, "Requesting new pad {:?}", stream_type);
+        gst::debug!(CAT, "Requesting new pad {:?}", stream_type);
 
         if (stream_type == StreamType::Audio && self.audio_sink.lock().unwrap().is_some())
             | (stream_type == StreamType::Video && self.video_sink.lock().unwrap().is_some())
         {
-            gst_error!(
+            gst::error!(
                 CAT,
-                obj: element,
+                imp: self,
                 "There is already an existing pad for a stream of type {:?}",
                 stream_type
             );
             return None;
         }
 
-        match self.setup_sink(element, template, stream_type) {
+        match self.setup_sink(template, stream_type) {
             Ok(pad) => Some(pad),
             Err(err) => {
-                gst_error!(CAT, obj: element, "{}", err,);
+                gst::error!(CAT, imp: self, "{}", err,);
                 None
             }
         }
     }
 
-    fn release_pad(&self, element: &Self::Type, pad: &gst::Pad) {
-        gst_debug!(CAT, "Release pad {:?}", pad.name());
+    fn release_pad(&self, pad: &gst::Pad) {
+        gst::debug!(CAT, "Release pad {:?}", pad.name());
 
         let bin = match pad.name().as_str().into() {
             StreamType::Audio => self.audio_sink.lock().unwrap().take(),
@@ -799,45 +808,47 @@ impl ElementImpl for OpenTokSink {
         };
 
         if let Some(ref bin) = bin {
-            if element.by_name(&bin.name()).is_some() {
+            if self.obj().by_name(&bin.name()).is_some() {
                 bin.set_state(gst::State::Null).unwrap();
                 let _ = bin.state(None);
-                let _ = self.remove_element(element, bin);
+                let _ = self.remove_element(bin);
             }
         }
 
-        let _ = element.remove_pad(pad);
+        let _ = self.obj().remove_pad(pad);
     }
 
     fn change_state(
         &self,
-        element: &Self::Type,
         transition: gst::StateChange,
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
-        gst_debug!(CAT, obj: element, "State changed {:?}", transition);
+        gst::debug!(CAT, imp: self, "State changed {:?}", transition);
         if transition == gst::StateChange::NullToReady {
             async_std::task::block_on(
-                self.credentials.lock().unwrap().load(Duration::from_secs(5))
-            ).map_err(|error| {
-                gst_error!(CAT, "Error changing state: {:?}", error);
+                self.credentials
+                    .lock()
+                    .unwrap()
+                    .load(Duration::from_secs(5)),
+            )
+            .map_err(|error| {
+                gst::error!(CAT, "Error changing state: {:?}", error);
 
                 gst::StateChangeError
             })?;
 
-            if let Err(e) = self.maybe_init_session(&element.clone().upcast()) {
-                gst_error!(
+            if let Err(e) = self.maybe_init_session() {
+                gst::error!(
                     CAT,
-                    obj: element,
+                    imp: self,
                     "Failed to initialize OpenTok session: {:?}",
                     e
                 )
             }
-
         }
         if transition == gst::StateChange::PausedToPlaying {
-            self.ensure_publisher(element);
+            self.ensure_publisher();
         }
-        let success = self.parent_change_state(element, transition)?;
+        let success = self.parent_change_state(transition)?;
         if transition == gst::StateChange::ReadyToNull {
             self.teardown();
         }
@@ -854,14 +865,14 @@ impl URIHandlerImpl for OpenTokSink {
         &["opentok"]
     }
 
-    fn uri(&self, _: &Self::Type) -> Option<String> {
+    fn uri(&self) -> Option<String> {
         self.location()
     }
 
-    fn set_uri(&self, element: &Self::Type, uri: &str) -> Result<(), glib::Error> {
+    fn set_uri(&self, uri: &str) -> Result<(), glib::Error> {
         self.set_location(uri)
             .map_err(|e| glib::Error::new(gst::CoreError::Failed, &format!("{:?}", e)))?;
-        self.maybe_init_session(element.upcast_ref::<gst::Element>())
+        self.maybe_init_session()
             .map_err(|e| glib::Error::new(gst::CoreError::Failed, &format!("{:?}", e)))
     }
 }

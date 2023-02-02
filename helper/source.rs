@@ -8,7 +8,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use anyhow::Result;
-use glib::clone;
+use gst::glib::{self, clone};
 use gst::prelude::*;
 use ipc_channel::ipc::{self, IpcSender};
 use log::debug;
@@ -25,12 +25,14 @@ pub struct Source {
 impl Source {
     fn on_pad_created(pipeline: &gst::Pipeline, pad: &gst::Pad, socket_path: &str) -> Result<()> {
         let bin_name = format!("bin_{}", pad.name());
-        let bin = gst::ElementFactory::make("bin", Some(&bin_name))?;
+        let bin = gst::ElementFactory::make("bin").name(&bin_name).build()?;
 
-        let queue = gst::ElementFactory::make("queue", None)?;
-        let sink = gst::ElementFactory::make("shmsink", Some(&format!("sink_{}", pad.name())))?;
-        sink.set_property("socket-path", &socket_path);
-        sink.set_property("enable-last-sample", false);
+        let queue = gst::ElementFactory::make("queue").build()?;
+        let sink = gst::ElementFactory::make("shmsink")
+            .name(&format!("sink_{}", pad.name()))
+            .property("socket-path", &socket_path)
+            .property("enable-last-sample", false)
+            .build()?;
 
         let bin_ref = bin.downcast_ref::<gst::Bin>().unwrap();
         bin_ref.add_many(&[&queue, &sink])?;

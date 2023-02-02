@@ -7,12 +7,12 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use glib::prelude::*;
+use gst::glib::{self, prelude::*};
 
 mod imp;
 
 glib::wrapper! {
-    pub struct OpenTokSrc(ObjectSubclass<imp::OpenTokSrc>) @extends gst::Bin, gst::Element, gst::Object, @implements gst::URIHandler;
+    pub struct OpenTokSrc(ObjectSubclass<imp::OpenTokSrc>) @extends gst::Bin, gst::Element, gst::Object;
 }
 
 unsafe impl Send for OpenTokSrc {}

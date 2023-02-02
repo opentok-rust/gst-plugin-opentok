@@ -8,7 +8,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use anyhow::{anyhow, ensure};
-use gst::{gst_debug, gst_error, gst_warning};
+use gst::glib;
 use gst_video::VideoFormat;
 use ipc_channel::ipc::IpcSender;
 use once_cell::sync::Lazy;
@@ -158,7 +158,7 @@ impl Credentials {
     }
 
     pub async fn load(&mut self, timeout: std::time::Duration) -> Result<(), anyhow::Error> {
-        gst_debug!(CAT, "Loading!!");
+        gst::debug!(CAT, "Loading!!");
         if !self.room_uri.is_some() {
             return Ok(());
         }
@@ -250,38 +250,43 @@ pub fn otc_format_from_gst_format(format: VideoFormat) -> FrameFormat {
 }
 
 pub fn caps() -> (gst::Caps, gst::Caps) {
-    let video_caps = gst::Caps::new_simple(
-        "video/x-raw",
-        &[
-            (
-                "format",
-                &gst::List::new(&[
-                    &VideoFormat::Nv12.to_str(),
-                    &VideoFormat::Nv21.to_str(),
-                    &VideoFormat::Uyvy.to_str(),
-                    &VideoFormat::I420.to_str(),
-                    &VideoFormat::Yuy2.to_str(),
-                    &VideoFormat::Bgr.to_str(),
-                ]),
-            ),
-            ("width", &gst::IntRange::<i32>::new(1, i32::MAX)),
-            ("height", &gst::IntRange::<i32>::new(1, i32::MAX)),
-            (
-                "framerate",
-                &gst::FractionRange::new(gst::Fraction::new(0, 1), gst::Fraction::new(i32::MAX, 1)),
-            ),
-        ],
-    );
+    let video_caps = gst::Caps::builder_full()
+        .structure(
+            gst::Structure::builder("video/x-raw")
+                .field(
+                    "format",
+                    &gst::List::new(&[
+                        &VideoFormat::Nv12.to_str(),
+                        &VideoFormat::Nv21.to_str(),
+                        &VideoFormat::Uyvy.to_str(),
+                        &VideoFormat::I420.to_str(),
+                        &VideoFormat::Yuy2.to_str(),
+                        &VideoFormat::Bgr.to_str(),
+                    ]),
+                )
+                .field("width", &gst::IntRange::<i32>::new(1, i32::MAX))
+                .field("height", &gst::IntRange::<i32>::new(1, i32::MAX))
+                .field(
+                    "framerate",
+                    &gst::FractionRange::new(
+                        gst::Fraction::new(0, 1),
+                        gst::Fraction::new(i32::MAX, 1),
+                    ),
+                )
+                .build(),
+        )
+        .build();
 
-    let audio_caps = gst::Caps::new_simple(
-        "audio/x-raw",
-        &[
-            ("format", &gst_audio::AUDIO_FORMAT_S16.to_str()),
-            ("layout", &"interleaved"),
-            ("rate", &44100),
-            ("channels", &1),
-        ],
-    );
+    let audio_caps = gst::Caps::builder_full()
+        .structure(
+            gst::Structure::builder("audio/x-raw")
+                .field("format", &gst_audio::AUDIO_FORMAT_S16.to_str())
+                .field("layout", &"interleaved")
+                .field("rate", &44100)
+                .field("channels", &1)
+                .build(),
+        )
+        .build();
 
     (video_caps, audio_caps)
 }
@@ -292,11 +297,11 @@ pub fn pipe_opentok_to_gst_log(category: gst::DebugCategory) {
             if msg.contains("Could not check wether there is a proxy") {
                 return;
             }
-            gst_error!(category, "{}", msg);
+            gst::error!(category, "{}", msg);
         } else if msg.contains("WARN") {
-            gst_warning!(category, "{}", msg);
+            gst::warning!(category, "{}", msg);
         } else {
-            gst_debug!(category, "{}", msg);
+            gst::debug!(category, "{}", msg);
         }
     }))
 }
@@ -304,7 +309,7 @@ pub fn pipe_opentok_to_gst_log(category: gst::DebugCategory) {
 static INIT: Once = Once::new();
 pub fn init() {
     INIT.call_once(|| {
-        gst::gst_info!(CAT, "Initializing OpenTok");
+        gst::info!(CAT, "Initializing OpenTok");
         opentok::init().unwrap()
     });
 }

@@ -7,7 +7,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use glib::clone;
+use gst::glib::{self, clone};
 use gst::prelude::*;
 use ipc_channel::ipc::{self, IpcSender};
 use log::debug;
@@ -35,7 +35,10 @@ impl Sink {
         let path = Path::new(&socket_path);
         let socket_id = path.file_name().unwrap();
 
-        let bin = gst::ElementFactory::make("bin", socket_id.to_str()).unwrap();
+        let bin = gst::ElementFactory::make("bin")
+            .name(socket_id.to_str().unwrap())
+            .build()
+            .unwrap();
         let bin_ref = bin.downcast_ref::<gst::Bin>().unwrap();
 
         let (name, caps) = match stream {
@@ -48,18 +51,22 @@ impl Sink {
         let sink_pad = opentoksink.request_pad_simple(name).unwrap();
         debug!("Got pad {:?}", name);
 
-        let shmsrc = gst::ElementFactory::make("shmsrc", Some(&format!("shmsrc_{}", name)))
+        let shmsrc = gst::ElementFactory::make("shmsrc")
+            .name(&format!("shmsrc_{}", name))
+            .build()
             .map_err(|_| Error::MissingElement("shmsrc"))?;
         shmsrc.set_property("is-live", true);
         shmsrc.set_property("do-timestamp", true);
         shmsrc.set_property("socket-path", &socket_path);
 
-        let queue =
-            gst::ElementFactory::make("queue", None).map_err(|_| Error::MissingElement("queue"))?;
+        let queue = gst::ElementFactory::make("queue")
+            .build()
+            .map_err(|_| Error::MissingElement("queue"))?;
 
-        let capsfilter =
-            gst::ElementFactory::make("capsfilter", Some(&format!("capsfilter_{}", name)))
-                .map_err(|_| Error::MissingElement("capsfilter"))?;
+        let capsfilter = gst::ElementFactory::make("capsfilter")
+            .name(&format!("capsfilter_{}", name))
+            .build()
+            .map_err(|_| Error::MissingElement("capsfilter"))?;
         capsfilter.set_property("caps", &caps);
 
         bin_ref

@@ -13,7 +13,8 @@ extern crate gstopentok;
 
 use anyhow::Result;
 use derive_more::{Display, Error};
-use glib::clone;
+use gst::glib;
+use gst::glib::clone;
 use gst::prelude::*;
 
 #[path = "./cli.rs"]
@@ -58,22 +59,22 @@ fn create_pipeline(mut settings: cli::Settings) -> Result<gst::Pipeline> {
     opentoksrc.connect_pad_added(clone!(
         @weak pipeline
     => move |_src, pad| {
-        let bin = gst::ElementFactory::make("bin", Some(&format!("bin_{}", pad.name()))).unwrap();
+        let bin = gst::ElementFactory::make("bin").name(&format!("bin_{}", pad.name())).build().unwrap();
         let bin_ref = bin.downcast_ref::<gst::Bin>().unwrap();
-        let queue = gst::ElementFactory::make("queue", None).unwrap();
+        let queue = gst::ElementFactory::make("queue").build().unwrap();
         bin_ref.add(&queue).unwrap();
 
         if pad.name() == "audio_stream" {
-            let audioconvert = gst::ElementFactory::make("audioconvert", None).unwrap();
-            let audioresample = gst::ElementFactory::make("audioresample", None).unwrap();
-            let sink = gst::ElementFactory::make("autoaudiosink", None).unwrap();
+            let audioconvert = gst::ElementFactory::make("audioconvert").build().unwrap();
+            let audioresample = gst::ElementFactory::make("audioresample").build().unwrap();
+            let sink = gst::ElementFactory::make("autoaudiosink").build().unwrap();
             bin_ref
                 .add_many(&[&audioconvert, &audioresample, &sink])
                 .unwrap();
             gst::Element::link_many(&[&queue, &audioconvert, &audioresample, &sink]).unwrap();
         } else {
-            let videoconvert = gst::ElementFactory::make("videoconvert", None).unwrap();
-            let sink = gst::ElementFactory::make("autovideosink", None).unwrap();
+            let videoconvert = gst::ElementFactory::make("videoconvert").build().unwrap();
+            let sink = gst::ElementFactory::make("autovideosink").build().unwrap();
             bin_ref.add_many(&[&videoconvert, &sink]).unwrap();
             gst::Element::link_many(&[&queue, &videoconvert, &sink]).unwrap();
         };
@@ -145,7 +146,7 @@ fn main_loop(pipeline: gst::Pipeline, settings: cli::Settings) -> Result<()> {
             }
             MessageView::StateChanged(state) => {
                 let pipeline = pipeline_.upgrade().unwrap();
-                if state.src().map(|s| s == pipeline).unwrap_or(false) {
+                if state.src().map(|s| s == pipeline.upcast_ref::<gst::Object>()).unwrap_or(false) {
                     let bin_ref = pipeline.upcast_ref::<gst::Bin>();
                     gst::debug_bin_to_dot_file_with_ts(
                         bin_ref,

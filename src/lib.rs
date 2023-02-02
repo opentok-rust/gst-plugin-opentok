@@ -15,6 +15,7 @@ mod opentoksrc;
 #[path = "./opentoksrc-remote/mod.rs"]
 mod opentoksrc_remote;
 
+use gst::glib;
 pub use opentoksink::OpenTokSink;
 pub use opentoksink_remote::OpenTokSinkRemote;
 pub use opentoksrc::OpenTokSrc;
