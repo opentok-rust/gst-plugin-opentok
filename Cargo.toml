@@ -76,3 +76,11 @@ path = "examples/publisher.rs"
 [[example]]
 name = "subscriber"
 path = "examples/subscriber.rs"
+
+[dev-dependencies]
+futures = "0.3.17"
+
+[dev-dependencies.cargo-husky]
+version = "1.5.0"
+default-features = false
+features = ["user-hooks"]

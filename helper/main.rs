@@ -49,7 +49,9 @@ fn create_pipeline(settings: cli::Settings) -> Result<(gst::Pipeline, Arc<dyn Ip
     let credentials = &settings.credentials;
     let location = format!(
         "opentok://{}?key={}&token={}",
-        &credentials.session_id().unwrap(), &credentials.api_key().unwrap(), &credentials.token().unwrap()
+        &credentials.session_id().unwrap(),
+        &credentials.api_key().unwrap(),
+        &credentials.token().unwrap()
     );
 
     let uri_type = match settings.direction {

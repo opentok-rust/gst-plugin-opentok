@@ -99,51 +99,61 @@ pub struct Credentials {
 }
 
 impl Credentials {
-
     pub fn is_complete(&self) -> bool {
-        self.room_uri.is_some() || (
-            self.api_key.is_some() &&
-            self.session_id.is_some() &&
-            self.token.is_some()
-        )
+        self.room_uri.is_some()
+            || (self.api_key.is_some() && self.session_id.is_some() && self.token.is_some())
     }
 
     pub fn room_uri(&self) -> Option<&Url> {
         self.room_uri.as_ref()
     }
 
-
     pub fn stream_id(&self) -> Option<&String> {
         self.stream_id.as_ref()
     }
 
     pub fn set_api_key(&mut self, key: String) -> Result<(), anyhow::Error> {
-        ensure!(self.room_uri.is_none(), anyhow!("Can't set api_key when room_uri is set"));
+        ensure!(
+            self.room_uri.is_none(),
+            anyhow!("Can't set api_key when room_uri is set")
+        );
         self.api_key = Some(key);
         Ok(())
     }
 
     pub fn set_session_id(&mut self, id: String) -> Result<(), anyhow::Error> {
-        ensure!(self.room_uri.is_none(), anyhow!("Can't set session_id when room_uri is set"));
+        ensure!(
+            self.room_uri.is_none(),
+            anyhow!("Can't set session_id when room_uri is set")
+        );
         self.session_id = Some(id);
 
         Ok(())
     }
 
     pub fn set_token(&mut self, token: String) -> Result<(), anyhow::Error> {
-        ensure!(self.room_uri.is_none(), anyhow!("Can't set token when room_uri is set"));
+        ensure!(
+            self.room_uri.is_none(),
+            anyhow!("Can't set token when room_uri is set")
+        );
         self.token = Some(token);
         Ok(())
     }
 
     pub fn set_stream_id(&mut self, stream_id: String) -> Result<(), anyhow::Error> {
-        ensure!(self.room_uri.is_none(), anyhow!("Can't set stream_id when room_uri is set"));
+        ensure!(
+            self.room_uri.is_none(),
+            anyhow!("Can't set stream_id when room_uri is set")
+        );
         self.api_key = Some(stream_id);
         Ok(())
     }
 
     pub fn set_room_uri(&mut self, uri: String) -> Result<(), anyhow::Error> {
-        ensure!(self.api_key.is_none() || self.session_id.is_none() || self.token.is_none(), anyhow!("Can't set `room_uri` when any other field is set"));
+        ensure!(
+            self.api_key.is_none() || self.session_id.is_none() || self.token.is_none(),
+            anyhow!("Can't set `room_uri` when any other field is set")
+        );
 
         self.room_uri = Some(Url::parse(&uri).map_err(|err| {
             glib::BoolError::new(
@@ -159,28 +169,39 @@ impl Credentials {
 
     pub async fn load(&mut self, timeout: std::time::Duration) -> Result<(), anyhow::Error> {
         gst::debug!(CAT, "Loading!!");
-        if !self.room_uri.is_some() {
+        if self.room_uri.is_none() {
             return Ok(());
         }
 
         let info_url = format!("{}/info", self.room_uri.as_ref().unwrap());
-        let json = async_std::future::timeout(timeout,
-                async {
-                    match surf::get(&info_url).recv_string().await {
-                        Ok(payload) => {
-                            json::parse(&payload).map_err(|err| anyhow!(err))
-                        },
-                        Err(e) => {
-                            Err(anyhow!(e))
-                        }
-                    }
-                }
-        ).await.map_err(|err| anyhow!(err))??;
+        let json = async_std::future::timeout(timeout, async {
+            match surf::get(&info_url).recv_string().await {
+                Ok(payload) => json::parse(&payload).map_err(|err| anyhow!(err)),
+                Err(e) => Err(anyhow!(e)),
+            }
+        })
+        .await
+        .map_err(|err| anyhow!(err))??;
 
-        self.api_key = Some(json["apiKey"].as_str().ok_or(anyhow!("No `apiKey` in json"))?.into());
-        self.session_id = Some(json["sessionId"].as_str().ok_or(anyhow!("No `sessionId` key in json"))?.into());
-        self.token = Some(json["token"].as_str().ok_or(anyhow!("No `token` key in json"))?.into());
-        gst_debug!(CAT, "Loaded {:?}", self);
+        self.api_key = Some(
+            json["apiKey"]
+                .as_str()
+                .ok_or_else(|| anyhow!("No `apiKey` in json"))?
+                .into(),
+        );
+        self.session_id = Some(
+            json["sessionId"]
+                .as_str()
+                .ok_or_else(|| anyhow!("No `sessionId` key in json"))?
+                .into(),
+        );
+        self.token = Some(
+            json["token"]
+                .as_str()
+                .ok_or_else(|| anyhow!("No `token` key in json"))?
+                .into(),
+        );
+        gst::debug!(CAT, "Loaded {:?}", self);
 
         Ok(())
     }
@@ -222,7 +243,6 @@ impl From<Url> for Credentials {
         }
     }
 }
-
 
 pub fn gst_from_otc_format(format: FrameFormat) -> VideoFormat {
     // FIXME: RGBA variants, mjpeg, raw (?)

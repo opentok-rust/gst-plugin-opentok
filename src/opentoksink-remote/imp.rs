@@ -277,9 +277,9 @@ impl OpenTokSinkRemote {
 
     fn maybe_init(&self) -> Result<(), Error> {
         let credentials = self.credentials.lock().unwrap();
-        if let Some(ref api_key) = credentials.api_key() {
-            if let Some(ref session_id) = credentials.session_id() {
-                if let Some(ref token) = credentials.token() {
+        if let Some(api_key) = credentials.api_key() {
+            if let Some(session_id) = credentials.session_id() {
+                if let Some(token) = credentials.token() {
                     return self.init(api_key, session_id, token);
                 }
             }

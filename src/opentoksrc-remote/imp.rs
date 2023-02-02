@@ -104,10 +104,11 @@ impl OpenTokSrcRemote {
         gst::debug!(CAT, "Spawning child process");
         let mut command = std::process::Command::new("gst-opentok-helper");
 
-        command.arg("--direction")
-                .arg("src")
-                .arg("--ipc-server")
-                .arg(ipc_server_name);
+        command
+            .arg("--direction")
+            .arg("src")
+            .arg("--ipc-server")
+            .arg(ipc_server_name);
 
         let credentials = self.credentials.lock().unwrap();
         if credentials.api_key().is_some() {
@@ -122,7 +123,6 @@ impl OpenTokSrcRemote {
             command
                 .arg("--room-uri")
                 .arg(credentials.room_uri().unwrap().as_str());
-
         }
         drop(credentials);
 
@@ -412,7 +412,7 @@ impl OpenTokSrcRemote {
                                 socket_path,
                             ) {
                                 Ok(()) => ipc_sender.send(()).unwrap(),
-                                Err(err) => OpenTokSrcRemote::critical_error(&err.to_string(), &this.obj().upcast_ref(), &child_process),
+                                Err(err) => OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process),
                             }
                         },
                         StreamMessageData::CapsChanged(caps, pad_name) => {

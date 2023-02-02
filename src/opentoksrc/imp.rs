@@ -568,9 +568,9 @@ impl OpenTokSrc {
 
     fn maybe_init_session(&self) -> Result<(), Error> {
         let credentials = self.state.lock().unwrap().credentials.clone();
-        if let Some(ref api_key) = credentials.api_key() {
-            if let Some(ref session_id) = credentials.session_id() {
-                if let Some(ref token) = credentials.token() {
+        if let Some(api_key) = credentials.api_key() {
+            if let Some(session_id) = credentials.session_id() {
+                if let Some(token) = credentials.token() {
                     return self.init_session(api_key, session_id, token);
                 }
             }
