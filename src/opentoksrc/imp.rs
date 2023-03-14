@@ -7,15 +7,14 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::common::{caps, gst_from_otc_format, pipe_opentok_to_gst_log, Credentials, Error, init};
+use crate::common::{caps, gst_from_otc_format, init, pipe_opentok_to_gst_log, Credentials, Error};
 
 use anyhow::anyhow;
 use byte_slice_cast::*;
-use glib::subclass::prelude::*;
-use glib::{clone, ToValue};
+use gst::glib::subclass::prelude::*;
+use gst::glib::{self, clone, ToValue};
 use gst::prelude::*;
 use gst::subclass::prelude::*;
-use gst::{gst_debug, gst_error, gst_fixme, gst_trace};
 use once_cell::sync::Lazy;
 use opentok::audio_device::{AudioDevice, AudioSample};
 use opentok::log::{self, LogLevel};
@@ -61,7 +60,6 @@ struct State {
     flow_combiner: gst_base::UniqueFlowCombiner,
 }
 
-#[derive(Clone)]
 pub struct OpenTokSrc {
     state: Arc<Mutex<State>>,
     /// Pad template for the video stream.
@@ -84,7 +82,7 @@ impl AppSrcStateHolder {
     ) {
         let query_allocator = holder.lock().unwrap().query_allocator;
         if query_allocator && holder.lock().unwrap().allocator.is_none() {
-            let mut allocation_query = gst::query::Allocation::new(caps, true);
+            let mut allocation_query = gst::query::Allocation::new(Some(caps), true);
             let appsrc_pad = src.static_pad("src").unwrap();
             if appsrc_pad.peer_query(&mut allocation_query) {
                 let mut allocator_found = false;
@@ -135,7 +133,7 @@ impl AppSrcStateHolder {
             .dynamic_cast::<gst_app::AppSrc>()
             .expect("Element is expected to be an appsrc!");
         if let Err(err) = appsrc.push_sample(&sample) {
-            gst_error!(CAT, obj: &appsrc, "Failed to push sample: {:?}", err);
+            gst::error!(CAT, obj: &appsrc, "Failed to push sample: {:?}", err);
         };
     }
 }
@@ -147,15 +145,15 @@ impl State {
         location: &str,
     ) -> Result<(), glib::BoolError> {
         if self.credentials.room_uri().is_some() {
-                return Err(glib::BoolError::new(
-                    format!("Credential already set {:?}", self.credentials),
-                    file!(),
-                    "set_location",
-                    line!(),
-                ));
+            return Err(glib::BoolError::new(
+                format!("Credential already set {:?}", self.credentials),
+                file!(),
+                "set_location",
+                line!(),
+            ));
         }
 
-        gst_debug!(CAT, obj: element, "Setting location to {}", location);
+        gst::debug!(CAT, obj: element, "Setting location to {}", location);
         let url = Url::parse(location).map_err(|err| {
             glib::BoolError::new(
                 format!("Malformed url {:?}", err),
@@ -165,7 +163,7 @@ impl State {
             )
         })?;
         let credentials: Credentials = url.into();
-        gst_debug!(CAT, obj: element, "Credentials {:?}", credentials);
+        gst::debug!(CAT, obj: element, "Credentials {:?}", credentials);
         if let Some(ref stream_id) = credentials.stream_id() {
             if !stream_id.is_empty() {
                 self.set_stream_id(element, stream_id.to_string());
@@ -177,7 +175,7 @@ impl State {
     }
 
     fn set_stream_id(&mut self, element: &super::OpenTokSrc, id: String) {
-        gst_debug!(CAT, obj: element, "Setting stream ID to {}", id);
+        gst::debug!(CAT, obj: element, "Setting stream ID to {}", id);
         self.stream_id = Some(id);
     }
 
@@ -189,10 +187,10 @@ impl State {
         stream: opentok::stream::Stream,
     ) -> Result<(gst::Element, gst::GhostPad), Error> {
         let stream_id = stream.id();
-        gst_debug!(CAT, obj: element, "Stream received {}", stream_id);
+        gst::debug!(CAT, obj: element, "Stream received {}", stream_id);
 
         if let Some(ref stream_id_to_subscribe) = self.stream_id {
-            gst_debug!(
+            gst::debug!(
                 CAT,
                 obj: element,
                 "We want to subscribe to stream {}",
@@ -205,7 +203,7 @@ impl State {
                 ));
             }
         } else {
-            gst_debug!(CAT, obj: element, "We want to subscribe to all streams");
+            gst::debug!(CAT, obj: element, "We want to subscribe to all streams");
         }
 
         // The stream may grow a video feed at some point during its life time and we
@@ -217,8 +215,9 @@ impl State {
             .clone()
             .downcast::<gst::Bin>()
             .unwrap();
-        gst_debug!(CAT, obj: element, "Setup video stream");
-        let video_appsrc = gst::ElementFactory::make("appsrc", None)
+        gst::debug!(CAT, obj: element, "Setup video stream");
+        let video_appsrc = gst::ElementFactory::make("appsrc")
+            .build()
             .map_err(|_| Error::MissingElement("appsrc"))?;
         video_appsrc.set_property("is-live", &true);
         video_appsrc.set_property("format", &gst::Format::Time);
@@ -239,8 +238,7 @@ impl State {
                         Some(element) => element,
                     };
 
-                    let src = OpenTokSrc::from_instance(&element);
-                    src.proxy_pad_chain(&element, pad, buffer)
+                    element.imp().proxy_pad_chain(pad, buffer)
                 }
             })
             .build_with_target(&appsrc_src_pad)
@@ -264,27 +262,27 @@ impl State {
             .on_error(clone!(
                 @weak element
             => move |_, error, _| {
-                gst_error!(CAT, obj: &element, "Error notified from subscriber: {:?}", error);
+                gst::error!(CAT, obj: &element, "Error notified from subscriber: {:?}", error);
             }))
             .on_audio_enabled(clone!(
                 @weak element
             => move |_| {
-                gst_debug!(CAT, obj: &element, "Audio enabled");
+                gst::debug!(CAT, obj: &element, "Audio enabled");
             }))
             .on_audio_disabled(clone!(
                 @weak element
             => move |_| {
-                gst_debug!(CAT, obj: &element, "Audio disabled");
+                gst::debug!(CAT, obj: &element, "Audio disabled");
             }))
             .on_video_enabled(clone!(@weak video_pad,
                                      @weak element,
                                      @weak video_appsrc => move |_, _| {
-                OpenTokSrc::enable_video(&element, &video_pad, &video_appsrc);
+                element.imp().enable_video(&video_pad, &video_appsrc);
             }))
             .on_video_disabled(clone!(@weak video_pad,
                                       @weak element,
                                       @weak video_appsrc => move |_, _| {
-                OpenTokSrc::disable_video(&element, &video_pad, &video_appsrc);
+                element.imp().disable_video(&video_pad, &video_appsrc);
             }))
             .build();
 
@@ -295,7 +293,7 @@ impl State {
             .map_err(|e| Error::SubscriberStreamSetupFailed(format!("{}", e)))?;
 
         if let Err(err) = session.subscribe(&subscriber) {
-            gst_error!(
+            gst::error!(
                 CAT,
                 obj: element,
                 "Failed to subscribe to stream {:?}: {:?}",
@@ -317,12 +315,12 @@ impl State {
 
     fn stream_dropped(&mut self, element: &super::OpenTokSrc, stream: opentok::stream::Stream) {
         let stream_id = stream.id();
-        gst_debug!(CAT, obj: element, "Stream dropped {}", stream_id);
+        gst::debug!(CAT, obj: element, "Stream dropped {}", stream_id);
 
         let subscriber = match self.subscribers.remove(&stream_id) {
             Some(subscriber) => subscriber,
             None => {
-                gst_fixme!(
+                gst::fixme!(
                     CAT,
                     obj: element,
                     "No registered subscriber info for stream id {:?}",
@@ -346,7 +344,7 @@ impl State {
         let _ = bin.remove_pad(&subscriber.video_pad);
 
         if self.subscribers.is_empty() {
-            gst_debug!(
+            gst::debug!(
                 CAT,
                 obj: element,
                 "All subscribers gone. Releasing audio pad"
@@ -378,45 +376,51 @@ fn generate_video_pad_name(subscribers: &HashMap<String, Subscriber>) -> std::st
 }
 
 impl OpenTokSrc {
-    fn start(&self, element: &super::OpenTokSrc) -> Result<(), anyhow::Error> {
-        gst_error!(CAT, obj: element, "OpenTokSrc initialization");
+    fn start(&self) -> Result<(), anyhow::Error> {
+        gst::info!(CAT, imp: self, "OpenTokSrc initialization");
 
         async_std::task::block_on(
-            self.state.lock().unwrap().credentials.load(Duration::from_secs(5))
+            self.state
+                .lock()
+                .unwrap()
+                .credentials
+                .load(Duration::from_secs(5)),
         )?;
 
         log::enable_log(LogLevel::Error);
 
         pipe_opentok_to_gst_log(*CAT);
 
-        self.maybe_init_session(element).map_err(|error| {anyhow!(error)})
+        self.maybe_init_session().map_err(|error| anyhow!(error))
     }
 
-    fn stop(&self, element: &super::OpenTokSrc) -> Result<(), gst::StateChangeError> {
-        let bin = element.upcast_ref::<gst::Bin>();
-        if let Some(audio_appsrc) = bin.by_name("audio_appsrc") {
-            bin.set_locked_state(true);
+    fn stop(&self) -> Result<(), gst::StateChangeError> {
+        let obj = self.obj();
+        if let Some(audio_appsrc) = obj.by_name("audio_appsrc") {
+            obj.set_locked_state(true);
             audio_appsrc.set_state(gst::State::Null)?;
             let _ = audio_appsrc.state(None);
-            bin.remove(&audio_appsrc).unwrap();
-            let audio_pad = element.static_pad("audio_stream").unwrap();
-            bin.set_locked_state(false);
-            element.remove_pad(&audio_pad).map_err(|error| {
-                gst_error!(CAT, obj: element, "Unable to remove audio pad: {:?}", error,);
+            obj.remove(&audio_appsrc).unwrap();
+            let audio_pad = self.obj().static_pad("audio_stream").unwrap();
+            obj.set_locked_state(false);
+            self.obj().remove_pad(&audio_pad).map_err(|error| {
+                gst::error!(CAT, imp: self, "Unable to remove audio pad: {:?}", error,);
                 gst::StateChangeError
             })?;
         }
 
         for (_name, subscriber) in self.state.lock().unwrap().subscribers.drain() {
-            bin.set_locked_state(true);
+            obj.set_locked_state(true);
             subscriber.video_appsrc.set_state(gst::State::Null)?;
             let _ = subscriber.video_appsrc.state(None);
-            bin.remove(&subscriber.video_appsrc).unwrap();
-            bin.set_locked_state(false);
-            element.remove_pad(&subscriber.video_pad).map_err(|error| {
-                gst_error!(CAT, obj: element, "Unable to remove video pad: {:?}", error,);
-                gst::StateChangeError
-            })?;
+            obj.remove(&subscriber.video_appsrc).unwrap();
+            obj.set_locked_state(false);
+            self.obj()
+                .remove_pad(&subscriber.video_pad)
+                .map_err(|error| {
+                    gst::error!(CAT, imp: self, "Unable to remove video pad: {:?}", error,);
+                    gst::StateChangeError
+                })?;
         }
 
         Ok(())
@@ -433,11 +437,10 @@ impl OpenTokSrc {
 
     fn proxy_pad_chain(
         &self,
-        element: &super::OpenTokSrc,
         pad: &gst::ProxyPad,
         buffer: gst::Buffer,
     ) -> Result<gst::FlowSuccess, gst::FlowError> {
-        let res = gst::ProxyPad::chain_default(pad, Some(element), buffer);
+        let res = gst::ProxyPad::chain_default(pad, Some(&*self.obj()), buffer);
         self.state
             .lock()
             .unwrap()
@@ -445,18 +448,16 @@ impl OpenTokSrc {
             .update_pad_flow(pad, res)
     }
 
-    fn init_audio(&self, element: &super::OpenTokSrc) -> Result<(), Error> {
-        let bin = element
-            .upcast_ref::<gst::Element>()
-            .clone()
-            .downcast::<gst::Bin>()
-            .unwrap();
-        let appsrc = gst::ElementFactory::make("appsrc", Some("audio_appsrc"))
+    fn init_audio(&self) -> Result<(), Error> {
+        let obj = self.obj();
+        let appsrc = gst::ElementFactory::make("appsrc")
+            .name("audio_appsrc")
+            .build()
             .map_err(|_| Error::MissingElement("appsrc"))?;
         appsrc.set_property("is-live", &true);
         appsrc.set_property("format", &gst::Format::Time);
 
-        bin.add(&appsrc).map_err(|_| Error::AddElement("appsrc"))?;
+        obj.add(&appsrc).map_err(|_| Error::AddElement("appsrc"))?;
 
         let appsrc_src_pad = appsrc
             .static_pad("src")
@@ -465,15 +466,14 @@ impl OpenTokSrc {
         let templ = &self.audio_src_pad_template;
         let audio_pad = gst::GhostPad::builder_with_template(templ, Some(&templ.name()))
             .proxy_pad_chain_function({
-                let element_weak = element.downgrade();
+                let this_weak = self.downgrade();
                 move |pad, _parent, buffer| {
-                    let element = match element_weak.upgrade() {
+                    let this = match this_weak.upgrade() {
                         None => return Err(gst::FlowError::Flushing),
-                        Some(element) => element,
+                        Some(this) => this,
                     };
 
-                    let src = OpenTokSrc::from_instance(&element);
-                    src.proxy_pad_chain(&element, pad, buffer)
+                    this.proxy_pad_chain(pad, buffer)
                 }
             })
             .build_with_target(&appsrc_src_pad)
@@ -490,8 +490,8 @@ impl OpenTokSrc {
             ControlFlow::Continue(gst::EventForeachAction::Keep)
         });
 
-        if let Err(err) = bin.add_pad(&audio_pad) {
-            gst_error!(CAT, obj: element, "Failed to add audio pad {:?}", err)
+        if let Err(err) = obj.add_pad(&audio_pad) {
+            gst::error!(CAT, imp: self, "Failed to add audio pad {:?}", err)
         }
         appsrc.sync_state_with_parent().unwrap();
 
@@ -510,51 +510,45 @@ impl OpenTokSrc {
         Ok(())
     }
 
-    fn init_session(
-        &self,
-        element: &super::OpenTokSrc,
-        api_key: &str,
-        session_id: &str,
-        token: &str,
-    ) -> Result<(), Error> {
+    fn init_session(&self, api_key: &str, session_id: &str, token: &str) -> Result<(), Error> {
         if self.state.lock().unwrap().session.is_some() {
             return Ok(());
         }
 
-        self.init_audio(element)?;
+        self.init_audio()?;
 
         let video_src_pad_template = &self.video_src_pad_template;
         let state = self.state.clone();
         let session_callbacks = SessionCallbacks::builder()
             .on_stream_received(clone!(
-                @weak element,
+                @weak self as this,
                 @weak state,
                 @weak video_src_pad_template,
                 => move |session, stream| {
                     let has_video = stream.has_video();
                 let (video_appsrc, video_pad) =
-                    match state.lock().unwrap().stream_received(&element, &video_src_pad_template, session, stream) {
+                    match state.lock().unwrap().stream_received(&*this.obj(), &video_src_pad_template, session, stream) {
                         Ok((appsrc, pad)) => (appsrc, pad),
                         Err(err) => {
-                            gst_error!(CAT, obj: &element, "{}", err);
+                            gst::error!(CAT, imp: this, "{}", err);
                             return;
                         }
                     };
 
                 if has_video {
-                    OpenTokSrc::enable_video(&element, &video_pad, &video_appsrc);
+                    this.enable_video(&video_pad, &video_appsrc);
                 }
             }))
             .on_stream_dropped(clone!(
-                @weak element,
+                @weak self as this,
                 @weak state,
             => move |_, stream| {
-                state.lock().unwrap().stream_dropped(&element, stream);
+                state.lock().unwrap().stream_dropped(&*this.obj(), stream);
             }))
             .on_error(clone!(
-                @weak element
+                @weak self as this
             => move |_, error, _| {
-                gst::element_error!(&element, gst::ResourceError::Read, [error]);
+                gst::element_error!(&this.obj(), gst::ResourceError::Read, [error]);
             }))
             .build();
         match Session::new(api_key, session_id, session_callbacks) {
@@ -572,29 +566,21 @@ impl OpenTokSrc {
         }
     }
 
-    fn maybe_init_session(&self, element: &super::OpenTokSrc) -> Result<(), Error> {
+    fn maybe_init_session(&self) -> Result<(), Error> {
         let credentials = self.state.lock().unwrap().credentials.clone();
-        if let Some(ref api_key) = credentials.api_key() {
-            if let Some(ref session_id) = credentials.session_id() {
-                if let Some(ref token) = credentials.token() {
-                    return self.init_session(element, api_key, session_id, token);
+        if let Some(api_key) = credentials.api_key() {
+            if let Some(session_id) = credentials.session_id() {
+                if let Some(token) = credentials.token() {
+                    return self.init_session(api_key, session_id, token);
                 }
             }
         }
         Ok(())
     }
 
-    fn enable_video(
-        element: &super::OpenTokSrc,
-        video_pad: &gst::GhostPad,
-        video_appsrc: &gst::Element,
-    ) {
-        let bin = element
-            .upcast_ref::<gst::Element>()
-            .downcast_ref::<gst::Bin>()
-            .unwrap();
-        gst_debug!(CAT, obj: element, "Enabling video pad");
-        bin.add_pad(video_pad).unwrap();
+    fn enable_video(&self, video_pad: &gst::GhostPad, video_appsrc: &gst::Element) {
+        gst::debug!(CAT, imp: self, "Enabling video pad");
+        self.obj().add_pad(video_pad).unwrap();
         video_pad.set_active(true).unwrap();
         let appsrc_src_pad = video_appsrc.static_pad("src").unwrap();
         appsrc_src_pad.sticky_events_foreach(|event| {
@@ -605,22 +591,15 @@ impl OpenTokSrc {
         video_appsrc.sync_state_with_parent().unwrap();
     }
 
-    fn disable_video(
-        element: &super::OpenTokSrc,
-        video_pad: &gst::GhostPad,
-        video_appsrc: &gst::Element,
-    ) {
-        gst_debug!(CAT, obj: element, "Disabling video pad");
+    fn disable_video(&self, video_pad: &gst::GhostPad, video_appsrc: &gst::Element) {
+        gst::debug!(CAT, imp: self, "Disabling video pad");
         video_pad.set_active(false).unwrap();
 
-        let bin = element
-            .upcast_ref::<gst::Element>()
-            .downcast_ref::<gst::Bin>()
-            .unwrap();
-        bin.set_locked_state(true);
+        let obj = self.obj();
+        obj.set_locked_state(true);
         video_appsrc.set_state(gst::State::Ready).unwrap();
-        bin.set_locked_state(false);
-        bin.remove_pad(video_pad).unwrap();
+        obj.set_locked_state(false);
+        obj.remove_pad(video_pad).unwrap();
     }
 
     fn push_audio_sample(
@@ -652,7 +631,7 @@ impl OpenTokSrc {
         let format = frame.get_format().unwrap();
         let width = frame.get_width().unwrap() as i32;
         let height = frame.get_height().unwrap() as i32;
-        gst_trace!(
+        gst::trace!(
             CAT,
             obj: appsrc,
             "Pushing video frame with dimensions {}x{}",
@@ -697,81 +676,69 @@ impl ObjectSubclass for OpenTokSrc {
 }
 
 impl ObjectImpl for OpenTokSrc {
-    fn constructed(&self, obj: &Self::Type) {
-        self.parent_constructed(obj);
+    fn constructed(&self) {
+        self.parent_constructed();
 
-        obj.set_suppressed_flags(gst::ElementFlags::SOURCE | gst::ElementFlags::SINK);
-        obj.set_element_flags(gst::ElementFlags::SOURCE);
+        self.obj()
+            .set_suppressed_flags(gst::ElementFlags::SOURCE | gst::ElementFlags::SINK);
+        self.obj().set_element_flags(gst::ElementFlags::SOURCE);
     }
 
     fn properties() -> &'static [glib::ParamSpec] {
         static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
             vec![
-                glib::ParamSpecString::new(
+                glib::ParamSpecString::builder(
                     "api-key",
-                    "ApiKey",
+                )
+                .blurb(
                     "OpenTok API key",
-                    None,
-                    glib::ParamFlags::READWRITE,
-                ),
-                glib::ParamSpecString::new(
-                    "session-id",
-                    "SessionId",
+                )
+                .build(),
+                glib::ParamSpecString::builder(
+                    "session-id"
+                )
+                .blurb(
                     "OpenTok session unique identifier",
-                    None,
-                    glib::ParamFlags::READWRITE,
-                ),
-                glib::ParamSpecString::new(
+                ).build(),
+                glib::ParamSpecString::builder(
                     "token",
-                    "SessionToken",
+                )
+                .blurb(
                     "OpenTok session token",
-                    None,
-                    glib::ParamFlags::READWRITE,
-                ),
-                glib::ParamSpecString::new(
+                )
+                .build(),
+                glib::ParamSpecString::builder(
                     "stream-id",
-                    "StreamId",
+                ).blurb(
                     "Unique identifier of the OpenTok stream this source subscribes to",
-                    None,
-                    glib::ParamFlags::READWRITE,
-                ),
-                glib::ParamSpecString::new(
+                )
+                .build(),
+                glib::ParamSpecString::builder(
                     "location",
-                    "Location",
+                )
+                .blurb(
                     "OpenTok session location (i.e. opentok://<session id>/key=<api key>&token=<token>)",
-                    None,
-                    glib::ParamFlags::READWRITE,
-                ),
-                glib::ParamSpecString::new(
+                ).build(),
+                glib::ParamSpecString::builder(
                     "demo-room-uri",
-                    "Room uri of the OpenTok demo",
+                ).blurb(
                     "URI of the opentok demo room, eg. https://opentokdemo.tokbox.com/room/rust345",
-                    None,
-                    glib::ParamFlags::READWRITE,
-                ),
-                glib::ParamSpecBoolean::new(
+                ).build(),
+                glib::ParamSpecBoolean::builder(
                     "is-live",
-                    "Is Live",
-                    "Always!",
-                    true,
-                    glib::ParamFlags::READABLE,
-                ),
+                )
+                .default_value(true)
+                .build(),
             ]
         });
 
         PROPERTIES.as_ref()
     }
 
-    fn set_property(
-        &self,
-        obj: &Self::Type,
-        _id: usize,
-        value: &glib::Value,
-        pspec: &glib::ParamSpec,
-    ) {
+    fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
         let log_if_err_fn = |res| {
             if let Err(err) = res {
-                gst_error!(CAT, "Got error: {:?}", err);
+                gst::error!(CAT, "Got error: {:?}", err);
             }
         };
         let mut state = self.state.lock().unwrap();
@@ -788,7 +755,7 @@ impl ObjectImpl for OpenTokSrc {
             }
             "stream-id" => {
                 if let Ok(stream_id) = value.get::<String>() {
-                    state.set_stream_id(obj, stream_id);
+                    state.set_stream_id(&*self.obj(), stream_id);
                 }
             }
             "token" => {
@@ -798,18 +765,22 @@ impl ObjectImpl for OpenTokSrc {
             }
             "location" => {
                 let location = value.get::<String>().expect("expected a string");
-                if let Err(e) = state.set_location(obj, &location) {
-                    gst_error!(CAT, obj: obj, "Failed to set location: {:?}", e)
+                if let Err(e) = state.set_location(&*self.obj(), &location) {
+                    gst::error!(CAT, imp: self, "Failed to set location: {:?}", e)
                 }
             }
             "demo-room-uri" => {
-                log_if_err_fn(state.credentials.set_room_uri(value.get::<String>().expect("expected a string")));
+                log_if_err_fn(
+                    state
+                        .credentials
+                        .set_room_uri(value.get::<String>().expect("expected a string")),
+                );
             }
             _ => unimplemented!(),
         }
     }
 
-    fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+    fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
         match pspec.name() {
             "api-key" => {
                 let state = self.state.lock().unwrap();
@@ -832,9 +803,14 @@ impl ObjectImpl for OpenTokSrc {
                 state.credentials.token().to_value()
             }
             "location" => self.location().to_value(),
-            "demo-room-uri" => {
-                self.state.lock().unwrap().credentials.room_uri().map(|url| url.as_str()).to_value()
-            }
+            "demo-room-uri" => self
+                .state
+                .lock()
+                .unwrap()
+                .credentials
+                .room_uri()
+                .map(|url| url.as_str())
+                .to_value(),
             "is-live" => true.to_value(),
             _ => unimplemented!(),
         }
@@ -887,27 +863,26 @@ impl ElementImpl for OpenTokSrc {
 
     fn change_state(
         &self,
-        element: &Self::Type,
         transition: gst::StateChange,
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
-        gst_debug!(CAT, obj: element, "Changing state {:?}", transition);
+        gst::debug!(CAT, imp: self, "Changing state {:?}", transition);
 
         if transition == gst::StateChange::NullToReady {
-            self.start(element).map_err(|error| {
-                gst_error!(CAT, "Error changing state: {:?}", error);
+            self.start().map_err(|error| {
+                gst::error!(CAT, "Error changing state: {:?}", error);
 
                 gst::StateChangeError
             })?;
         }
 
-        let mut success = self.parent_change_state(element, transition)?;
+        let mut success = self.parent_change_state(transition)?;
 
         if transition == gst::StateChange::ReadyToPaused {
             success = gst::StateChangeSuccess::NoPreroll;
         }
 
         if transition == gst::StateChange::PausedToReady {
-            self.stop(element)?;
+            self.stop()?;
         }
 
         Ok(success)
@@ -923,14 +898,14 @@ impl URIHandlerImpl for OpenTokSrc {
         &["opentok"]
     }
 
-    fn uri(&self, _: &Self::Type) -> Option<String> {
+    fn uri(&self) -> Option<String> {
         self.location()
     }
 
-    fn set_uri(&self, obj: &Self::Type, uri: &str) -> Result<(), glib::Error> {
+    fn set_uri(&self, uri: &str) -> Result<(), glib::Error> {
         let mut state = self.state.lock().unwrap();
         state
-            .set_location(obj, uri)
+            .set_location(&*self.obj(), uri)
             .map_err(|e| glib::Error::new(gst::CoreError::Failed, &format!("{:?}", e)))
     }
 }

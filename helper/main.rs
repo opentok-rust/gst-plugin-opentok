@@ -9,7 +9,7 @@
 
 use anyhow::Result;
 use async_std::prelude::*;
-use gst::prelude::*;
+use gst::{glib, prelude::*};
 use gstopentok::common::IpcMessage;
 use signal_hook::consts::signal::*;
 use signal_hook_async_std::Signals;
@@ -49,7 +49,9 @@ fn create_pipeline(settings: cli::Settings) -> Result<(gst::Pipeline, Arc<dyn Ip
     let credentials = &settings.credentials;
     let location = format!(
         "opentok://{}?key={}&token={}",
-        &credentials.session_id().unwrap(), &credentials.api_key().unwrap(), &credentials.token().unwrap()
+        &credentials.session_id().unwrap(),
+        &credentials.api_key().unwrap(),
+        &credentials.token().unwrap()
     );
 
     let uri_type = match settings.direction {
@@ -104,7 +106,11 @@ fn run_main_loop(
             }
             MessageView::StateChanged(state) => {
                 let pipeline = pipeline_.upgrade().unwrap();
-                if state.src().map(|s| s == pipeline).unwrap_or(false) {
+                if state
+                    .src()
+                    .map(|s| s == pipeline.upcast_ref::<gst::Object>())
+                    .unwrap_or(false)
+                {
                     let bin_ref = pipeline.upcast_ref::<gst::Bin>();
                     gst::debug_bin_to_dot_file_with_ts(
                         bin_ref,
@@ -126,7 +132,7 @@ fn run_main_loop(
     pipeline.set_state(gst::State::Ready)?;
     main_loop.run();
 
-    bus.post(&gst::message::Eos::new()).unwrap();
+    bus.post(gst::message::Eos::new()).unwrap();
 
     pipeline.set_state(gst::State::Null)?;
     bus.remove_watch()?;

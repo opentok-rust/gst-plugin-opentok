@@ -33,7 +33,6 @@ pub async fn parse_cli() -> Option<Settings> {
     let mut credentials = Credentials::default();
     if let Some(api_key) = matches.value_of("api_key") {
         credentials.set_api_key(api_key.into()).unwrap();
-
     }
     if let Some(session_id) = matches.value_of("session_id") {
         credentials.set_session_id(session_id.into()).unwrap();
@@ -49,16 +48,14 @@ pub async fn parse_cli() -> Option<Settings> {
         }
     }
 
-    if !credentials.is_complete()
-    {
+    if !credentials.is_complete() {
         eprintln!("===> Incomplete credentials!");
         app.print_help().unwrap();
         return None;
     }
 
-    if let Err(err) = async_std::task::block_on(
-        credentials.load(std::time::Duration::from_secs(5))
-    ) {
+    if let Err(err) = async_std::task::block_on(credentials.load(std::time::Duration::from_secs(5)))
+    {
         eprintln!("could not load credentials: {:?}", err);
         app.print_help().unwrap();
         return None;

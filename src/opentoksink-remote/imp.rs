@@ -9,11 +9,10 @@
 
 use crate::common::{caps, Credentials, Error, IpcMessage, StreamMessage, StreamMessageData};
 
-use glib::subclass::prelude::*;
-use glib::{clone, ToValue};
+use gst::glib::subclass::prelude::*;
+use gst::glib::{self, clone, ToValue};
 use gst::prelude::*;
 use gst::subclass::prelude::*;
-use gst::{gst_debug, gst_error, gst_trace, gst_warning};
 use ipc_channel::ipc::{IpcOneShotServer, IpcReceiver, IpcSender};
 use once_cell::sync::{Lazy, OnceCell};
 use signal_child::Signalable;
@@ -121,7 +120,7 @@ impl OpenTokSinkRemote {
     }
 
     fn set_location(&self, location: &str) -> Result<(), glib::BoolError> {
-        gst_debug!(CAT, "Setting location to {}", location);
+        gst::debug!(CAT, "Setting location to {}", location);
         let url = Url::parse(location).map_err(|err| {
             glib::BoolError::new(
                 format!("Malformed url {:?}", err),
@@ -131,7 +130,7 @@ impl OpenTokSinkRemote {
             )
         })?;
         let credentials: Credentials = url.into();
-        gst_debug!(CAT, "Credentials {:?}", credentials);
+        gst::debug!(CAT, "Credentials {:?}", credentials);
         if let Some(ref stream_id) = credentials.stream_id() {
             if !stream_id.is_empty() {
                 self.set_stream_id(stream_id.to_string())?;
@@ -143,7 +142,7 @@ impl OpenTokSinkRemote {
     }
 
     fn set_stream_id(&self, id: String) -> Result<(), glib::BoolError> {
-        gst_debug!(CAT, "Setting stream ID to {}", id);
+        gst::debug!(CAT, "Setting stream ID to {}", id);
         self.stream_id.set(id).map_err(|_| {
             glib::BoolError::new(
                 "Stream ID can only be set once",
@@ -161,7 +160,7 @@ impl OpenTokSinkRemote {
         session_id: &str,
         token: &str,
     ) -> Result<(), Error> {
-        gst_debug!(CAT, "Spawning child process");
+        gst::debug!(CAT, "Spawning child process");
         let mut command = std::process::Command::new("gst-opentok-helper");
         command
             .arg("--api-key")
@@ -190,7 +189,7 @@ impl OpenTokSinkRemote {
         element: &gst::Element,
         child_process: &Arc<Mutex<Option<Child>>>,
     ) {
-        gst_error!(CAT, obj: element, "{}", error);
+        gst::error!(CAT, obj: element, "{}", error);
         if let Some(mut child_process) = child_process.lock().unwrap().take() {
             let _ = child_process.interrupt();
         }
@@ -198,7 +197,7 @@ impl OpenTokSinkRemote {
             gst::CoreError::Failed,
             &format!("Child process error {}", error),
         )) {
-            gst_warning!(
+            gst::warning!(
                 CAT,
                 obj: element,
                 "Unable to post message on the bus. {}",
@@ -207,14 +206,8 @@ impl OpenTokSinkRemote {
         }
     }
 
-    fn init(
-        &self,
-        element: &gst::Element,
-        api_key: &str,
-        session_id: &str,
-        token: &str,
-    ) -> Result<(), Error> {
-        gst_debug!(CAT, obj: element, "Init");
+    fn init(&self, api_key: &str, session_id: &str, token: &str) -> Result<(), Error> {
+        gst::debug!(CAT, imp: self, "Init");
         // Spawn the child process and the auxiliary threads and hand over the
         // ipc server name.
         let (ipc_server, ipc_server_name): (IpcOneShotServer<IpcPeers>, String) =
@@ -223,7 +216,7 @@ impl OpenTokSinkRemote {
         self.launch_child_process(&ipc_server_name, api_key, session_id, token)?;
 
         let (_, (ipc_sender, ipc_receiver)) = ipc_server.accept().unwrap();
-        gst_debug!(CAT, obj: element, "Got IPC sender");
+        gst::debug!(CAT, imp: self, "Got IPC sender");
         *self.ipc_sender.lock().unwrap() = Some(ipc_sender);
 
         let child_process = self.child_process.clone();
@@ -233,12 +226,12 @@ impl OpenTokSinkRemote {
         let credentials = &self.credentials;
 
         thread::spawn(clone!(
-            @weak element,
+            @weak self as this,
             @weak child_process,
             @weak ipc_thread_running,
             @weak credentials,
         => move || {
-            gst_debug!(CAT, obj: &element, "IPC thread running");
+            gst::debug!(CAT, imp: this, "IPC thread running");
             ipc_thread_running.store(true, Ordering::Relaxed);
             loop {
                 if !ipc_thread_running.load(Ordering::Relaxed) {
@@ -246,12 +239,12 @@ impl OpenTokSinkRemote {
                 }
                 match ipc_receiver.try_recv() {
                     Ok(message) => {
-                        gst_debug!(CAT, obj: &element, "IPC message received: {:?}", message);
+                        gst::debug!(CAT, imp: this, "IPC message received: {:?}", message);
                         match message {
                             IpcMessage::Error(err) => {
                                 OpenTokSinkRemote::critical_error(
                                     &err,
-                                    &element,
+                                    this.obj().upcast_ref(),
                                     &child_process
                                 );
                                 break;
@@ -276,18 +269,18 @@ impl OpenTokSinkRemote {
                     Err(_) => std::thread::sleep(std::time::Duration::from_micros(10000)),
                 }
             }
-            gst_debug!(CAT, obj: &element, "IPC thread exiting");
+            gst::debug!(CAT, imp: this, "IPC thread exiting");
         }));
 
         Ok(())
     }
 
-    fn maybe_init(&self, element: &gst::Element) -> Result<(), Error> {
+    fn maybe_init(&self) -> Result<(), Error> {
         let credentials = self.credentials.lock().unwrap();
-        if let Some(ref api_key) = credentials.api_key() {
-            if let Some(ref session_id) = credentials.session_id() {
-                if let Some(ref token) = credentials.token() {
-                    return self.init(element, api_key, session_id, token);
+        if let Some(api_key) = credentials.api_key() {
+            if let Some(session_id) = credentials.session_id() {
+                if let Some(token) = credentials.token() {
+                    return self.init(api_key, session_id, token);
                 }
             }
         }
@@ -316,59 +309,56 @@ impl ObjectSubclass for OpenTokSinkRemote {
 }
 
 impl ObjectImpl for OpenTokSinkRemote {
-    fn constructed(&self, obj: &Self::Type) {
-        self.parent_constructed(obj);
-        obj.set_suppressed_flags(gst::ElementFlags::SOURCE | gst::ElementFlags::SINK);
-        obj.set_element_flags(gst::ElementFlags::SINK);
+    fn constructed(&self) {
+        self.parent_constructed();
+        self.obj()
+            .set_suppressed_flags(gst::ElementFlags::SOURCE | gst::ElementFlags::SINK);
+        self.obj().set_element_flags(gst::ElementFlags::SINK);
 
-        let element = obj.upcast_ref::<gst::Element>();
-        let element = element.downgrade();
+        let element = self.obj().upcast_ref::<gst::Element>().downgrade();
         *self.signal_emitter.lock().unwrap() = Some(SignalEmitter { element });
     }
 
     fn properties() -> &'static [glib::ParamSpec] {
         static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
             vec![
-                glib::ParamSpecString::new(
+                glib::ParamSpecString::builder(
                     "location",
-                    "Location",
+                )
+                .blurb(
                     "OpenTok session location (i.e. opentok-remote://<session id>/key=<api key>&token=<token>)",
-                    None,
-                    glib::ParamFlags::READWRITE,
-                ),
-                glib::ParamSpecString::new(
+                )
+                .build(),
+                glib::ParamSpecString::builder(
                     "stream-id",
-                    "StreamId",
+                )
+                .blurb(
                     "Unique identifier of the OpenTok stream this sink is publishing",
-                    None,
+                )
+                .flags(
                     glib::ParamFlags::READABLE,
-                ),
+                )
+                .build(),
         ]
         });
 
         PROPERTIES.as_ref()
     }
 
-    fn set_property(
-        &self,
-        obj: &Self::Type,
-        _id: usize,
-        value: &glib::Value,
-        pspec: &glib::ParamSpec,
-    ) {
-        gst_trace!(CAT, obj: obj, "Setting property {:?}", pspec.name());
+    fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
+        gst::trace!(CAT, imp: self, "Setting property {:?}", pspec.name());
         match pspec.name() {
             "location" => {
                 let location = value.get::<String>().expect("expected a string");
                 if let Err(e) = self.set_location(&location) {
-                    gst_error!(CAT, obj: obj, "Failed to set location: {:?}", e)
+                    gst::error!(CAT, imp: self, "Failed to set location: {:?}", e)
                 }
             }
             _ => unimplemented!(),
         }
     }
 
-    fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+    fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
         match pspec.name() {
             "location" => self.location().to_value(),
             "stream-id" => self
@@ -384,12 +374,9 @@ impl ObjectImpl for OpenTokSinkRemote {
 
     fn signals() -> &'static [glib::subclass::Signal] {
         static SIGNALS: Lazy<Vec<glib::subclass::Signal>> = Lazy::new(|| {
-            vec![glib::subclass::Signal::builder(
-                "published-stream",
-                &[String::static_type().into(), String::static_type().into()],
-                glib::types::Type::UNIT.into(),
-            )
-            .build()]
+            vec![glib::subclass::Signal::builder("published-stream")
+                .param_types([String::static_type(), String::static_type()])
+                .build()]
         });
 
         SIGNALS.as_ref()
@@ -439,25 +426,23 @@ impl ElementImpl for OpenTokSinkRemote {
 
     fn request_new_pad(
         &self,
-        element: &Self::Type,
         template: &gst::PadTemplate,
-        _name: Option<String>,
+        _name: Option<&str>,
         _caps: Option<&gst::Caps>,
     ) -> Option<gst::Pad> {
-        let stream_type: StreamType = match template.name_template() {
-            Some(name) => name.as_str().into(),
-            None => return None,
-        };
+        let stream_type: StreamType = template.name_template().into();
 
-        gst_debug!(CAT, obj: element, "Requesting new pad {:?}", stream_type);
+        gst::debug!(CAT, imp: self, "Requesting new pad {:?}", stream_type);
 
         let setup_sink = || -> Result<gst::Pad, Error> {
             let mut socket = std::env::temp_dir();
             socket.push(format!("opentok-{}-socket", Uuid::new_v4()));
             let socket_path = socket.to_str().unwrap().to_owned();
 
-            let bin =
-                gst::ElementFactory::make("bin", Some(&format!("bin_{}", &stream_type))).unwrap();
+            let bin = gst::ElementFactory::make("bin")
+                .name(&format!("bin_{}", &stream_type))
+                .build()
+                .unwrap();
 
             match stream_type {
                 StreamType::Audio => *self.audio_bin.lock().unwrap() = Some(bin.clone()),
@@ -465,11 +450,13 @@ impl ElementImpl for OpenTokSinkRemote {
                 StreamType::Unknown__ => unreachable!(),
             }
 
-            let queue = gst::ElementFactory::make("queue", None)
+            let queue = gst::ElementFactory::make("queue")
+                .build()
                 .map_err(|_| Error::MissingElement("queue"))?;
-            let sink =
-                gst::ElementFactory::make("shmsink", Some(&format!("sink_{}", &stream_type)))
-                    .map_err(|_| Error::MissingElement("shmsink"))?;
+            let sink = gst::ElementFactory::make("shmsink")
+                .name(&format!("sink_{}", &stream_type))
+                .build()
+                .map_err(|_| Error::MissingElement("shmsink"))?;
             sink.set_property("socket-path", &socket_path);
             sink.set_property("enable-last-sample", false);
 
@@ -486,7 +473,7 @@ impl ElementImpl for OpenTokSinkRemote {
             bin.add_pad(&bin_sink_pad)
                 .map_err(|_| Error::AddElement("bin sink pad"))?;
 
-            let element_bin_ref = element.clone().upcast::<gst::Bin>();
+            let element_bin_ref = self.obj().clone().upcast::<gst::Bin>();
             element_bin_ref
                 .add(&bin)
                 .map_err(|_| Error::AddElement("bin sink pad"))?;
@@ -497,7 +484,7 @@ impl ElementImpl for OpenTokSinkRemote {
                 .map_err(|_| Error::PadConstruction("shm_bin_sink", format!("{:?}", template)))?;
 
             pad.set_active(true).expect("activate bin sink pad");
-            element
+            self.obj()
                 .add_pad(&pad)
                 .map_err(|_| Error::AddElement("bin sink pad"))?;
 
@@ -507,7 +494,7 @@ impl ElementImpl for OpenTokSinkRemote {
                 if let Some(gst::PadProbeData::Event(ref event)) = info.data {
                     if let gst::EventView::Caps(caps) = event.view() {
                         let caps = caps.caps_owned();
-                        gst_debug!(
+                        gst::debug!(
                             CAT,
                             "Notifying socket {} and caps {:?}",
                             &socket_path,
@@ -563,14 +550,14 @@ impl ElementImpl for OpenTokSinkRemote {
         match setup_sink() {
             Ok(pad) => Some(pad),
             Err(err) => {
-                gst_error!(CAT, obj: element, "{}", err);
+                gst::error!(CAT, imp: self, "{}", err);
                 None
             }
         }
     }
 
-    fn release_pad(&self, element: &Self::Type, pad: &gst::Pad) {
-        gst_debug!(CAT, "Release pad {:?}", pad.name());
+    fn release_pad(&self, pad: &gst::Pad) {
+        gst::debug!(CAT, imp: self, "Release pad {:?}", pad.name());
 
         let bin = match pad.name().as_str().into() {
             StreamType::Audio => self.audio_bin.lock().unwrap().take(),
@@ -579,29 +566,28 @@ impl ElementImpl for OpenTokSinkRemote {
         };
 
         if let Some(ref bin) = bin {
-            if element.by_name(&bin.name()).is_some() {
+            if self.obj().by_name(&bin.name()).is_some() {
                 bin.set_state(gst::State::Null).unwrap();
                 let _ = bin.state(None);
-                let _ = self.remove_element(element, bin);
+                let _ = self.remove_element(bin);
             }
         }
 
-        let _ = element.remove_pad(pad);
+        let _ = self.obj().remove_pad(pad);
     }
 
     fn change_state(
         &self,
-        element: &Self::Type,
         transition: gst::StateChange,
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
-        gst_debug!(CAT, obj: element, "Changing state {:?}", transition);
+        gst::debug!(CAT, imp: self, "Changing state {:?}", transition);
 
         if transition == gst::StateChange::ReadyToNull {
             self.teardown();
         }
 
-        let success = self.parent_change_state(element, transition)?;
-        gst_debug!(CAT, obj: element, "State changed {:?}", transition);
+        let success = self.parent_change_state(transition)?;
+        gst::debug!(CAT, imp: self, "State changed {:?}", transition);
         Ok(success)
     }
 }
@@ -615,27 +601,27 @@ impl URIHandlerImpl for OpenTokSinkRemote {
         &["opentok-remote"]
     }
 
-    fn uri(&self, _: &Self::Type) -> Option<String> {
+    fn uri(&self) -> Option<String> {
         self.location()
     }
 
-    fn set_uri(&self, element: &Self::Type, uri: &str) -> Result<(), glib::Error> {
+    fn set_uri(&self, uri: &str) -> Result<(), glib::Error> {
         self.set_location(uri)
             .map_err(|e| glib::Error::new(gst::CoreError::Failed, &format!("{:?}", e)))?;
-        self.maybe_init(element.upcast_ref::<gst::Element>())
+        self.maybe_init()
             .map_err(|e| glib::Error::new(gst::CoreError::Failed, &format!("{:?}", e)))
     }
 }
 
 impl Drop for OpenTokSinkRemote {
     fn drop(&mut self) {
-        gst_debug!(CAT, "Dropping OpenTokSinkRemote");
+        gst::debug!(CAT, "Dropping OpenTokSinkRemote");
 
         self.teardown();
 
         if let Some(mut child_process) = self.child_process.lock().unwrap().take() {
             let _ = child_process.interrupt();
-            gst_debug!(CAT, "Interrupted child process");
+            gst::debug!(CAT, "Interrupted child process");
         }
     }
 }

@@ -8,7 +8,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use anyhow::{anyhow, ensure};
-use gst::{gst_debug, gst_error, gst_warning};
+use gst::glib;
 use gst_video::VideoFormat;
 use ipc_channel::ipc::IpcSender;
 use once_cell::sync::Lazy;
@@ -99,51 +99,61 @@ pub struct Credentials {
 }
 
 impl Credentials {
-
     pub fn is_complete(&self) -> bool {
-        self.room_uri.is_some() || (
-            self.api_key.is_some() &&
-            self.session_id.is_some() &&
-            self.token.is_some()
-        )
+        self.room_uri.is_some()
+            || (self.api_key.is_some() && self.session_id.is_some() && self.token.is_some())
     }
 
     pub fn room_uri(&self) -> Option<&Url> {
         self.room_uri.as_ref()
     }
 
-
     pub fn stream_id(&self) -> Option<&String> {
         self.stream_id.as_ref()
     }
 
     pub fn set_api_key(&mut self, key: String) -> Result<(), anyhow::Error> {
-        ensure!(self.room_uri.is_none(), anyhow!("Can't set api_key when room_uri is set"));
+        ensure!(
+            self.room_uri.is_none(),
+            anyhow!("Can't set api_key when room_uri is set")
+        );
         self.api_key = Some(key);
         Ok(())
     }
 
     pub fn set_session_id(&mut self, id: String) -> Result<(), anyhow::Error> {
-        ensure!(self.room_uri.is_none(), anyhow!("Can't set session_id when room_uri is set"));
+        ensure!(
+            self.room_uri.is_none(),
+            anyhow!("Can't set session_id when room_uri is set")
+        );
         self.session_id = Some(id);
 
         Ok(())
     }
 
     pub fn set_token(&mut self, token: String) -> Result<(), anyhow::Error> {
-        ensure!(self.room_uri.is_none(), anyhow!("Can't set token when room_uri is set"));
+        ensure!(
+            self.room_uri.is_none(),
+            anyhow!("Can't set token when room_uri is set")
+        );
         self.token = Some(token);
         Ok(())
     }
 
     pub fn set_stream_id(&mut self, stream_id: String) -> Result<(), anyhow::Error> {
-        ensure!(self.room_uri.is_none(), anyhow!("Can't set stream_id when room_uri is set"));
+        ensure!(
+            self.room_uri.is_none(),
+            anyhow!("Can't set stream_id when room_uri is set")
+        );
         self.api_key = Some(stream_id);
         Ok(())
     }
 
     pub fn set_room_uri(&mut self, uri: String) -> Result<(), anyhow::Error> {
-        ensure!(self.api_key.is_none() || self.session_id.is_none() || self.token.is_none(), anyhow!("Can't set `room_uri` when any other field is set"));
+        ensure!(
+            self.api_key.is_none() || self.session_id.is_none() || self.token.is_none(),
+            anyhow!("Can't set `room_uri` when any other field is set")
+        );
 
         self.room_uri = Some(Url::parse(&uri).map_err(|err| {
             glib::BoolError::new(
@@ -158,29 +168,40 @@ impl Credentials {
     }
 
     pub async fn load(&mut self, timeout: std::time::Duration) -> Result<(), anyhow::Error> {
-        gst_debug!(CAT, "Loading!!");
-        if !self.room_uri.is_some() {
+        gst::debug!(CAT, "Loading!!");
+        if self.room_uri.is_none() {
             return Ok(());
         }
 
         let info_url = format!("{}/info", self.room_uri.as_ref().unwrap());
-        let json = async_std::future::timeout(timeout,
-                async {
-                    match surf::get(&info_url).recv_string().await {
-                        Ok(payload) => {
-                            json::parse(&payload).map_err(|err| anyhow!(err))
-                        },
-                        Err(e) => {
-                            Err(anyhow!(e))
-                        }
-                    }
-                }
-        ).await.map_err(|err| anyhow!(err))??;
+        let json = async_std::future::timeout(timeout, async {
+            match surf::get(&info_url).recv_string().await {
+                Ok(payload) => json::parse(&payload).map_err(|err| anyhow!(err)),
+                Err(e) => Err(anyhow!(e)),
+            }
+        })
+        .await
+        .map_err(|err| anyhow!(err))??;
 
-        self.api_key = Some(json["apiKey"].as_str().ok_or(anyhow!("No `apiKey` in json"))?.into());
-        self.session_id = Some(json["sessionId"].as_str().ok_or(anyhow!("No `sessionId` key in json"))?.into());
-        self.token = Some(json["token"].as_str().ok_or(anyhow!("No `token` key in json"))?.into());
-        gst_debug!(CAT, "Loaded {:?}", self);
+        self.api_key = Some(
+            json["apiKey"]
+                .as_str()
+                .ok_or_else(|| anyhow!("No `apiKey` in json"))?
+                .into(),
+        );
+        self.session_id = Some(
+            json["sessionId"]
+                .as_str()
+                .ok_or_else(|| anyhow!("No `sessionId` key in json"))?
+                .into(),
+        );
+        self.token = Some(
+            json["token"]
+                .as_str()
+                .ok_or_else(|| anyhow!("No `token` key in json"))?
+                .into(),
+        );
+        gst::debug!(CAT, "Loaded {:?}", self);
 
         Ok(())
     }
@@ -223,7 +244,6 @@ impl From<Url> for Credentials {
     }
 }
 
-
 pub fn gst_from_otc_format(format: FrameFormat) -> VideoFormat {
     // FIXME: RGBA variants, mjpeg, raw (?)
     match format {
@@ -250,38 +270,43 @@ pub fn otc_format_from_gst_format(format: VideoFormat) -> FrameFormat {
 }
 
 pub fn caps() -> (gst::Caps, gst::Caps) {
-    let video_caps = gst::Caps::new_simple(
-        "video/x-raw",
-        &[
-            (
-                "format",
-                &gst::List::new(&[
-                    &VideoFormat::Nv12.to_str(),
-                    &VideoFormat::Nv21.to_str(),
-                    &VideoFormat::Uyvy.to_str(),
-                    &VideoFormat::I420.to_str(),
-                    &VideoFormat::Yuy2.to_str(),
-                    &VideoFormat::Bgr.to_str(),
-                ]),
-            ),
-            ("width", &gst::IntRange::<i32>::new(1, i32::MAX)),
-            ("height", &gst::IntRange::<i32>::new(1, i32::MAX)),
-            (
-                "framerate",
-                &gst::FractionRange::new(gst::Fraction::new(0, 1), gst::Fraction::new(i32::MAX, 1)),
-            ),
-        ],
-    );
+    let video_caps = gst::Caps::builder_full()
+        .structure(
+            gst::Structure::builder("video/x-raw")
+                .field(
+                    "format",
+                    &gst::List::new(&[
+                        &VideoFormat::Nv12.to_str(),
+                        &VideoFormat::Nv21.to_str(),
+                        &VideoFormat::Uyvy.to_str(),
+                        &VideoFormat::I420.to_str(),
+                        &VideoFormat::Yuy2.to_str(),
+                        &VideoFormat::Bgr.to_str(),
+                    ]),
+                )
+                .field("width", &gst::IntRange::<i32>::new(1, i32::MAX))
+                .field("height", &gst::IntRange::<i32>::new(1, i32::MAX))
+                .field(
+                    "framerate",
+                    &gst::FractionRange::new(
+                        gst::Fraction::new(0, 1),
+                        gst::Fraction::new(i32::MAX, 1),
+                    ),
+                )
+                .build(),
+        )
+        .build();
 
-    let audio_caps = gst::Caps::new_simple(
-        "audio/x-raw",
-        &[
-            ("format", &gst_audio::AUDIO_FORMAT_S16.to_str()),
-            ("layout", &"interleaved"),
-            ("rate", &44100),
-            ("channels", &1),
-        ],
-    );
+    let audio_caps = gst::Caps::builder_full()
+        .structure(
+            gst::Structure::builder("audio/x-raw")
+                .field("format", &gst_audio::AUDIO_FORMAT_S16.to_str())
+                .field("layout", &"interleaved")
+                .field("rate", &44100)
+                .field("channels", &1)
+                .build(),
+        )
+        .build();
 
     (video_caps, audio_caps)
 }
@@ -292,16 +317,19 @@ pub fn pipe_opentok_to_gst_log(category: gst::DebugCategory) {
             if msg.contains("Could not check wether there is a proxy") {
                 return;
             }
-            gst_error!(category, "{}", msg);
+            gst::error!(category, "{}", msg);
         } else if msg.contains("WARN") {
-            gst_warning!(category, "{}", msg);
+            gst::warning!(category, "{}", msg);
         } else {
-            gst_debug!(category, "{}", msg);
+            gst::debug!(category, "{}", msg);
         }
     }))
 }
 
 static INIT: Once = Once::new();
 pub fn init() {
-    INIT.call_once(|| opentok::init().unwrap());
+    INIT.call_once(|| {
+        gst::info!(CAT, "Initializing OpenTok");
+        opentok::init().unwrap()
+    });
 }
