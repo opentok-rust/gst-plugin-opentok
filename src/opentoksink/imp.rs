@@ -323,7 +323,7 @@ impl OpenTokSink {
                     settings.width = info.width() as i32;
                     settings.height = info.height() as i32;
                     let fps = info.fps();
-                    settings.fps = (fps.numer() / fps.denom()) as i32;
+                    settings.fps = fps.numer() / fps.denom();
                     settings.format = otc_format_from_gst_format(info.format());
                 }
                 Err(_) => {

@@ -218,8 +218,8 @@ impl State {
         let video_appsrc = gst::ElementFactory::make("appsrc")
             .build()
             .map_err(|_| Error::MissingElement("appsrc"))?;
-        video_appsrc.set_property("is-live", &true);
-        video_appsrc.set_property("format", &gst::Format::Time);
+        video_appsrc.set_property("is-live", true);
+        video_appsrc.set_property("format", gst::Format::Time);
 
         bin.add(&video_appsrc)
             .map_err(|_| Error::AddElement("appsrc"))?;
@@ -451,8 +451,8 @@ impl OpenTokSrc {
             .name("audio_appsrc")
             .build()
             .map_err(|_| Error::MissingElement("appsrc"))?;
-        appsrc.set_property("is-live", &true);
-        appsrc.set_property("format", &gst::Format::Time);
+        appsrc.set_property("is-live", true);
+        appsrc.set_property("format", gst::Format::Time);
 
         obj.add(&appsrc).map_err(|_| Error::AddElement("appsrc"))?;
 
@@ -524,7 +524,7 @@ impl OpenTokSrc {
                 => move |session, stream| {
                     let has_video = stream.has_video();
                 let (video_appsrc, video_pad) =
-                    match state.lock().unwrap().stream_received(&*this.obj(), &video_src_pad_template, session, stream) {
+                    match state.lock().unwrap().stream_received(&this.obj(), &video_src_pad_template, session, stream) {
                         Ok((appsrc, pad)) => (appsrc, pad),
                         Err(err) => {
                             gst::error!(CAT, imp: this, "{}", err);
@@ -540,7 +540,7 @@ impl OpenTokSrc {
                 @weak self as this,
                 @weak state,
             => move |_, stream| {
-                state.lock().unwrap().stream_dropped(&*this.obj(), stream);
+                state.lock().unwrap().stream_dropped(&this.obj(), stream);
             }))
             .on_error(clone!(
                 @weak self as this
@@ -626,8 +626,8 @@ impl OpenTokSrc {
     ) {
         let data = frame.get_buffer().unwrap();
         let format = frame.get_format().unwrap();
-        let width = frame.get_width().unwrap() as i32;
-        let height = frame.get_height().unwrap() as i32;
+        let width = frame.get_width().unwrap();
+        let height = frame.get_height().unwrap();
         gst::trace!(
             CAT,
             obj: appsrc,
@@ -752,7 +752,7 @@ impl ObjectImpl for OpenTokSrc {
             }
             "stream-id" => {
                 if let Ok(stream_id) = value.get::<String>() {
-                    state.set_stream_id(&*self.obj(), stream_id);
+                    state.set_stream_id(&self.obj(), stream_id);
                 }
             }
             "token" => {
@@ -762,7 +762,7 @@ impl ObjectImpl for OpenTokSrc {
             }
             "location" => {
                 let location = value.get::<String>().expect("expected a string");
-                if let Err(e) = state.set_location(&*self.obj(), &location) {
+                if let Err(e) = state.set_location(&self.obj(), &location) {
                     gst::error!(CAT, imp: self, "Failed to set location: {:?}", e)
                 }
             }
@@ -902,7 +902,7 @@ impl URIHandlerImpl for OpenTokSrc {
     fn set_uri(&self, uri: &str) -> Result<(), glib::Error> {
         let mut state = self.state.lock().unwrap();
         state
-            .set_location(&*self.obj(), uri)
+            .set_location(&self.obj(), uri)
             .map_err(|e| glib::Error::new(gst::CoreError::Failed, &format!("{:?}", e)))
     }
 }

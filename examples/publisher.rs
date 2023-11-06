@@ -73,9 +73,9 @@ fn create_pipeline(settings: cli::Settings) -> Result<gst::Pipeline> {
 
     let video_capsfilter = gst::ElementFactory::make("capsfilter").build().unwrap();
     let caps = gst::Caps::builder("video/x-raw")
-        .field("format", &"I420")
-        .field("width", &1280i32)
-        .field("height", &720i32)
+        .field("format", "I420")
+        .field("width", 1280i32)
+        .field("height", 720i32)
         .build();
 
     video_capsfilter.set_property("caps", &caps);
@@ -153,7 +153,7 @@ fn main_loop(pipeline: gst::Pipeline, settings: cli::Settings) -> Result<()> {
                     gst::debug_bin_to_dot_file_with_ts(
                         bin_ref,
                         gst::DebugGraphDetails::all(),
-                        &format!(
+                        format!(
                             "publisher_state_changed_{:?}_{:?}",
                             state.old(),
                             state.current()

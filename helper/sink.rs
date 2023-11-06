@@ -99,7 +99,7 @@ impl Sink {
         gst::debug_bin_to_dot_file_with_ts(
             bin_ref,
             gst::DebugGraphDetails::all(),
-            &format!("opentok_wrapper_init_{}", name,),
+            format!("opentok_wrapper_init_{}", name,),
         );
 
         Ok(())

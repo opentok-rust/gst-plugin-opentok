@@ -30,7 +30,7 @@ impl Source {
         let queue = gst::ElementFactory::make("queue").build()?;
         let sink = gst::ElementFactory::make("shmsink")
             .name(&format!("sink_{}", pad.name()))
-            .property("socket-path", &socket_path)
+            .property("socket-path", socket_path)
             .property("enable-last-sample", false)
             .build()?;
 

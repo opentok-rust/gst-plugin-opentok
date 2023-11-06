@@ -115,7 +115,7 @@ fn run_main_loop(
                     gst::debug_bin_to_dot_file_with_ts(
                         bin_ref,
                         gst::DebugGraphDetails::all(),
-                        &format!(
+                        format!(
                             "opentok_wrapper_state_changed_{:?}_{:?}",
                             state.old(),
                             state.current()
@@ -146,7 +146,7 @@ async fn main() -> Result<(), Error> {
     let main_loop = glib::MainLoop::new(None, false);
 
     let main_loop_clone = main_loop.clone();
-    let signals = Signals::new(&[SIGHUP, SIGTERM, SIGINT, SIGQUIT])?;
+    let signals = Signals::new([SIGHUP, SIGTERM, SIGINT, SIGQUIT])?;
     let handle = signals.handle();
 
     let signals_task = async_std::task::spawn(handle_signals(signals, main_loop_clone));
