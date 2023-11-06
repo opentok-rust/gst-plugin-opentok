@@ -93,7 +93,7 @@ fn create_pipeline(mut settings: cli::Settings) -> Result<gst::Pipeline> {
         gst::debug_bin_to_dot_file_with_ts(
             pipeline.upcast_ref::<gst::Bin>(),
             gst::DebugGraphDetails::all(),
-            &format!("{}_added", pad.name()),
+            format!("{}_added", pad.name()),
         );
     }));
 
@@ -109,7 +109,7 @@ fn create_pipeline(mut settings: cli::Settings) -> Result<gst::Pipeline> {
             gst::debug_bin_to_dot_file_with_ts(
                 bin_ref,
                 gst::DebugGraphDetails::all(),
-                &format!("{}_removed", pad.name()),
+                format!("{}_removed", pad.name()),
             );
         }
     }));
@@ -155,7 +155,7 @@ fn main_loop(pipeline: gst::Pipeline, settings: cli::Settings) -> Result<()> {
                     gst::debug_bin_to_dot_file_with_ts(
                         bin_ref,
                         gst::DebugGraphDetails::all(),
-                        &format!(
+                        format!(
                             "subscriber_state_changed_{:?}_{:?}",
                             state.old(),
                             state.current()

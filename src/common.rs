@@ -275,7 +275,7 @@ pub fn caps() -> (gst::Caps, gst::Caps) {
             gst::Structure::builder("video/x-raw")
                 .field(
                     "format",
-                    &gst::List::new(&[
+                    &gst::List::new([
                         &VideoFormat::Nv12.to_str(),
                         &VideoFormat::Nv21.to_str(),
                         &VideoFormat::Uyvy.to_str(),
@@ -284,11 +284,11 @@ pub fn caps() -> (gst::Caps, gst::Caps) {
                         &VideoFormat::Bgr.to_str(),
                     ]),
                 )
-                .field("width", &gst::IntRange::<i32>::new(1, i32::MAX))
-                .field("height", &gst::IntRange::<i32>::new(1, i32::MAX))
+                .field("width", gst::IntRange::<i32>::new(1, i32::MAX))
+                .field("height", gst::IntRange::<i32>::new(1, i32::MAX))
                 .field(
                     "framerate",
-                    &gst::FractionRange::new(
+                    gst::FractionRange::new(
                         gst::Fraction::new(0, 1),
                         gst::Fraction::new(i32::MAX, 1),
                     ),
@@ -300,10 +300,10 @@ pub fn caps() -> (gst::Caps, gst::Caps) {
     let audio_caps = gst::Caps::builder_full()
         .structure(
             gst::Structure::builder("audio/x-raw")
-                .field("format", &gst_audio::AUDIO_FORMAT_S16.to_str())
-                .field("layout", &"interleaved")
-                .field("rate", &44100)
-                .field("channels", &1)
+                .field("format", gst_audio::AUDIO_FORMAT_S16.to_str())
+                .field("layout", "interleaved")
+                .field("rate", 44100)
+                .field("channels", 1)
                 .build(),
         )
         .build();
