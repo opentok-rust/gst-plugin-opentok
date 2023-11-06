@@ -12,7 +12,7 @@ use gst::glib;
 use gst_video::VideoFormat;
 use ipc_channel::ipc::IpcSender;
 use once_cell::sync::Lazy;
-use opentok::log;
+use opentok::log::{self, LogLevel};
 use opentok::video_frame::FrameFormat;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Once};
@@ -311,17 +311,42 @@ pub fn caps() -> (gst::Caps, gst::Caps) {
     (video_caps, audio_caps)
 }
 
-pub fn pipe_opentok_to_gst_log(category: gst::DebugCategory) {
+pub fn pipe_opentok_to_gst_log() {
+    static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
+        gst::DebugCategory::new(
+            "opentokrs",
+            gst::DebugColorFlags::empty(),
+            Some("OpenTok Source"),
+        )
+    });
+
+    log::enable_log(match CAT.threshold() {
+        gst::DebugLevel::None => LogLevel::Disabled,
+        gst::DebugLevel::Error => LogLevel::Error,
+        gst::DebugLevel::Warning => LogLevel::Warn,
+        gst::DebugLevel::Fixme => LogLevel::Warn,
+        gst::DebugLevel::Info => LogLevel::Info,
+        gst::DebugLevel::Debug => LogLevel::Debug,
+        gst::DebugLevel::Log => LogLevel::Message,
+        gst::DebugLevel::Trace => LogLevel::Trace,
+        gst::DebugLevel::Memdump => LogLevel::All,
+        _ => LogLevel::All,
+    });
+
     log::logger_callback(Box::new(move |msg| {
-        if msg.contains("ERROR") {
+        if msg.starts_with("[ERROR]") {
             if msg.contains("Could not check wether there is a proxy") {
                 return;
             }
-            gst::error!(category, "{}", msg);
-        } else if msg.contains("WARN") {
-            gst::warning!(category, "{}", msg);
-        } else {
-            gst::debug!(category, "{}", msg);
+            gst::error!(CAT, "{}", msg);
+        } else if msg.starts_with("[WARN]") {
+            gst::warning!(CAT, "{}", msg);
+        } else if msg.starts_with("[DEBUG]") {
+            gst::debug!(CAT, "{}", msg);
+        } else if msg.starts_with("[LOG]") {
+            gst::log!(CAT, "{}", msg);
+        } else if msg.starts_with("[TRACE]") {
+            gst::trace!(CAT, "{}", msg);
         }
     }))
 }

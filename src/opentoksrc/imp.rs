@@ -17,7 +17,6 @@ use gst::prelude::*;
 use gst::subclass::prelude::*;
 use once_cell::sync::Lazy;
 use opentok::audio_device::{AudioDevice, AudioSample};
-use opentok::log::{self, LogLevel};
 use opentok::session::{Session, SessionCallbacks};
 use opentok::subscriber::{Subscriber as OpenTokSubscriber, SubscriberCallbacks};
 use opentok::video_frame::VideoFrame;
@@ -387,9 +386,7 @@ impl OpenTokSrc {
                 .load(Duration::from_secs(5)),
         )?;
 
-        log::enable_log(LogLevel::Error);
-
-        pipe_opentok_to_gst_log(*CAT);
+        pipe_opentok_to_gst_log();
 
         self.maybe_init_session().map_err(|error| anyhow!(error))
     }

@@ -27,8 +27,8 @@ extern crate gst;
 extern crate gstopentok;
 
 use anyhow::Result;
-use gst::prelude::*;
 use gst::glib;
+use gst::prelude::*;
 
 #[path = "./cli.rs"]
 mod cli;
