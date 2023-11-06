@@ -146,7 +146,11 @@ fn main_loop(pipeline: gst::Pipeline, settings: cli::Settings) -> Result<()> {
             }
             MessageView::StateChanged(state) => {
                 let pipeline = pipeline_.upgrade().unwrap();
-                if state.src().map(|s| s == pipeline.upcast_ref::<gst::Object>()).unwrap_or(false) {
+                if state
+                    .src()
+                    .map(|s| s == pipeline.upcast_ref::<gst::Object>())
+                    .unwrap_or(false)
+                {
                     let bin_ref = pipeline.upcast_ref::<gst::Bin>();
                     gst::debug_bin_to_dot_file_with_ts(
                         bin_ref,
