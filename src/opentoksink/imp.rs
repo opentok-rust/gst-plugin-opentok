@@ -18,7 +18,6 @@ use gst::prelude::*;
 use gst::subclass::prelude::*;
 use once_cell::sync::Lazy;
 use opentok::audio_device::{AudioDevice, AudioSampleData};
-use opentok::log::{self, LogLevel};
 use opentok::publisher::{Publisher, PublisherCallbacks};
 use opentok::session::{Session, SessionCallbacks};
 use opentok::video_capturer::{VideoCapturer, VideoCapturerCallbacks, VideoCapturerSettings};
@@ -561,13 +560,11 @@ impl ObjectImpl for OpenTokSink {
 
         gst::debug!(CAT, imp: self, "OpenTokSink initialization");
 
-        log::enable_log(LogLevel::Error);
-
         // Make sure the audio device is ready before the session is initiated,
         // otherwise OpenTok will use the libwebrtc default audio device.
         let _ = AudioDevice::get_instance();
 
-        pipe_opentok_to_gst_log(*CAT);
+        pipe_opentok_to_gst_log();
 
         let element = self.obj().upcast_ref::<gst::Element>().downgrade();
         *self.signal_emitter.lock().unwrap() = Some(SignalEmitter { element });
