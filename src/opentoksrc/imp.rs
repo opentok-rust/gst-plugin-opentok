@@ -386,8 +386,6 @@ impl OpenTokSrc {
                 .load(Duration::from_secs(5)),
         )?;
 
-        pipe_opentok_to_gst_log();
-
         self.maybe_init_session().map_err(|error| anyhow!(error))
     }
 
@@ -675,6 +673,8 @@ impl ObjectSubclass for OpenTokSrc {
 impl ObjectImpl for OpenTokSrc {
     fn constructed(&self) {
         self.parent_constructed();
+
+        pipe_opentok_to_gst_log();
 
         self.obj()
             .set_suppressed_flags(gst::ElementFlags::SOURCE | gst::ElementFlags::SINK);
