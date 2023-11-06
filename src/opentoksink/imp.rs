@@ -18,7 +18,7 @@ use gst::prelude::*;
 use gst::subclass::prelude::*;
 use once_cell::sync::Lazy;
 use opentok::audio_device::{AudioDevice, AudioSampleData};
-use opentok::publisher::{Publisher, PublisherCallbacks};
+use opentok::publisher::{Publisher, PublisherCallbacks, PublisherSettingsBuilder};
 use opentok::session::{Session, SessionCallbacks};
 use opentok::video_capturer::{VideoCapturer, VideoCapturerCallbacks, VideoCapturerSettings};
 use opentok::video_frame::VideoFrame;
@@ -291,8 +291,24 @@ impl OpenTokSink {
 
         gst::debug!(CAT, imp: self, "Initializing publisher");
 
-        // Even if we are only publishing audio for now, we need to add a video
-        // capturer, in case a video pad is requested at some point.
+        if self.video_sink.lock().unwrap().is_none() {
+            gst::info!(CAT, imp: self, "No video sink, not publishing video");
+
+            let publisher = Publisher::new_with_settings(
+                None,
+                PublisherSettingsBuilder::new()
+                    .name("opentoksink")
+                    .video_track(false)
+                    .build(),
+            );
+
+            *self.publisher.lock().unwrap() = Some(publisher);
+
+            gst::debug!(CAT, "Publisher created");
+
+            return;
+        }
+
         let credentials = &self.credentials;
         let published_stream_id = &self.published_stream_id;
         let video_sink = &self.video_sink;
@@ -763,8 +779,12 @@ impl ElementImpl for OpenTokSink {
         _name: Option<&str>,
         _caps: Option<&gst::Caps>,
     ) -> Option<gst::Pad> {
-        let stream_type: StreamType = template.name_template().into();
+        if self.obj().current_state() > gst::State::Ready {
+            gst::error!(CAT, "element pads can only be requested before starting");
+            return None;
+        }
 
+        let stream_type: StreamType = template.name_template().into();
         gst::debug!(
             CAT,
             imp: self,
@@ -820,7 +840,7 @@ impl ElementImpl for OpenTokSink {
         transition: gst::StateChange,
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
         gst::debug!(CAT, imp: self, "State changed {:?}", transition);
-        if transition == gst::StateChange::NullToReady {
+        if transition == gst::StateChange::ReadyToPaused {
             async_std::task::block_on(
                 self.credentials
                     .lock()
