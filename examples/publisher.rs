@@ -12,8 +12,8 @@ extern crate gst;
 
 use anyhow::Result;
 use derive_more::{Display, Error};
-use gst::prelude::*;
 use gst::glib;
+use gst::prelude::*;
 
 #[path = "./cli.rs"]
 mod cli;
@@ -36,19 +36,22 @@ fn create_pipeline(settings: cli::Settings) -> Result<gst::Pipeline> {
 
     let pipeline = gst::Pipeline::new(None);
 
-    let videotestsrc = gst::ElementFactory::make("videotestsrc").build()
+    let videotestsrc = gst::ElementFactory::make("videotestsrc")
+        .build()
         .map_err(|_| MissingElement("videotestsrc"))?;
     if let Some(ref pattern) = settings.video_pattern {
         videotestsrc.set_property_from_str("pattern", pattern);
     }
 
-    let audiotestsrc = gst::ElementFactory::make("audiotestsrc").build()
+    let audiotestsrc = gst::ElementFactory::make("audiotestsrc")
+        .build()
         .map_err(|_| MissingElement("audiotestsrc"))?;
     if let Some(ref wave) = settings.audio_wave {
         audiotestsrc.set_property_from_str("wave", wave);
     }
 
-    let timeoverlay = gst::ElementFactory::make("timeoverlay").build()
+    let timeoverlay = gst::ElementFactory::make("timeoverlay")
+        .build()
         .map_err(|_| MissingElement("timeoverlay"))?;
 
     let location = if let Some(opentok_url) = settings.opentok_url {
@@ -70,9 +73,9 @@ fn create_pipeline(settings: cli::Settings) -> Result<gst::Pipeline> {
 
     let video_capsfilter = gst::ElementFactory::make("capsfilter").build().unwrap();
     let caps = gst::Caps::builder("video/x-raw")
-        .field ("format", &"I420")
-        .field ("width", &1280i32)
-        .field ("height", &720i32)
+        .field("format", &"I420")
+        .field("width", &1280i32)
+        .field("height", &720i32)
         .build();
 
     video_capsfilter.set_property("caps", &caps);
@@ -141,7 +144,11 @@ fn main_loop(pipeline: gst::Pipeline, settings: cli::Settings) -> Result<()> {
             }
             MessageView::StateChanged(state) => {
                 let pipeline = pipeline_.upgrade().unwrap();
-                if state.src().map(|s| s == pipeline.upcast_ref::<gst::Object>()).unwrap_or(false) {
+                if state
+                    .src()
+                    .map(|s| s == pipeline.upcast_ref::<gst::Object>())
+                    .unwrap_or(false)
+                {
                     let bin_ref = pipeline.upcast_ref::<gst::Bin>();
                     gst::debug_bin_to_dot_file_with_ts(
                         bin_ref,
