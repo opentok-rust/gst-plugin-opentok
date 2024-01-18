@@ -329,16 +329,24 @@ impl ObjectImpl for OpenTokSinkRemote {
                     "OpenTok session location (i.e. opentok-remote://<session id>/key=<api key>&token=<token>)",
                 )
                 .build(),
+                glib::ParamSpecString::builder("stream-id")
+                    .blurb(
+                        "Unique identifier of the OpenTok stream this sink is publishing",
+                    )
+                    .flags(
+                        glib::ParamFlags::READABLE,
+                    )
+                    .build(),
                 glib::ParamSpecString::builder(
-                    "stream-id",
+                    "demo-room-uri",
                 )
-                .blurb(
-                    "Unique identifier of the OpenTok stream this sink is publishing",
-                )
-                .flags(
-                    glib::ParamFlags::READABLE,
-                )
-                .build(),
+                    .blurb(
+                        "URI of the opentok demo room, eg. https://opentokdemo.tokbox.com/room/rust345",
+                    )
+                    .flags(
+                        glib::ParamFlags::READWRITE,
+                    )
+                    .build(),
         ]
         });
 
@@ -347,12 +355,26 @@ impl ObjectImpl for OpenTokSinkRemote {
 
     fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
         gst::trace!(CAT, imp: self, "Setting property {:?}", pspec.name());
+        let log_if_err_fn = |res| {
+            if let Err(err) = res {
+                gst::error!(CAT, "Got error: {:?} while setting {}", err, pspec.name());
+            }
+        };
+
         match pspec.name() {
             "location" => {
                 let location = value.get::<String>().expect("expected a string");
                 if let Err(e) = self.set_location(&location) {
                     gst::error!(CAT, imp: self, "Failed to set location: {:?}", e)
                 }
+            }
+            "demo-room-uri" => {
+                log_if_err_fn(
+                    self.credentials
+                        .lock()
+                        .unwrap()
+                        .set_room_uri(value.get::<String>().expect("expected a string")),
+                );
             }
             _ => unimplemented!(),
         }
@@ -367,6 +389,13 @@ impl ObjectImpl for OpenTokSinkRemote {
                 .unwrap()
                 .clone()
                 .unwrap_or_else(|| "".into())
+                .to_value(),
+            "demo-room-uri" => self
+                .credentials
+                .lock()
+                .unwrap()
+                .room_uri()
+                .map(|url| url.as_str())
                 .to_value(),
             _ => unimplemented!(),
         }
@@ -581,6 +610,29 @@ impl ElementImpl for OpenTokSinkRemote {
         transition: gst::StateChange,
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
         gst::debug!(CAT, imp: self, "Changing state {:?}", transition);
+
+        if transition == gst::StateChange::ReadyToPaused {
+            async_std::task::block_on(
+                self.credentials
+                    .lock()
+                    .unwrap()
+                    .load(std::time::Duration::from_secs(5)),
+            )
+            .map_err(|error| {
+                gst::error!(CAT, "Error changing state: {:?}", error);
+
+                gst::StateChangeError
+            })?;
+
+            if let Err(e) = self.maybe_init() {
+                gst::error!(
+                    CAT,
+                    imp: self,
+                    "Failed to initialize OpenTok session: {:?}",
+                    e
+                )
+            }
+        }
 
         if transition == gst::StateChange::ReadyToNull {
             self.teardown();
