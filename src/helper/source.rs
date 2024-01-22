@@ -15,8 +15,8 @@ use log::debug;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-use crate::{cli, IpcMessenger};
-use gstopentok::common::{IpcMessage, StreamMessage, StreamMessageData};
+use crate::common::{IpcMessage, StreamMessage, StreamMessageData};
+use crate::helper::{cli, IpcMessenger};
 
 pub struct Source {
     ipc_sender: Arc<Mutex<IpcSender<IpcMessage>>>,

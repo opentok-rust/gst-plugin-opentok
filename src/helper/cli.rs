@@ -7,7 +7,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use gstopentok::common::Credentials;
+use crate::common::Credentials;
 
 #[derive(Debug)]
 pub enum Direction {

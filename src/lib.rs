@@ -8,6 +8,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 pub mod common;
+pub mod helper;
 mod opentoksink;
 #[path = "./opentoksink-remote/mod.rs"]
 mod opentoksink_remote;
