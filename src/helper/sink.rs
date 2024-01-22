@@ -17,10 +17,10 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::{IpcMessenger, Stream};
-use gstopentok::common::{Error, IpcMessage, StreamMessage, StreamMessageData};
+use crate::common::{Error, IpcMessage, StreamMessage, StreamMessageData};
+use crate::helper::{IpcMessenger, Stream};
 
-use crate::cli;
+use crate::helper::cli;
 
 pub struct Sink {
     ipc_sender: Arc<Mutex<IpcSender<IpcMessage>>>,
