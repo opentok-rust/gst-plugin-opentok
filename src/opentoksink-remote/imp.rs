@@ -160,8 +160,20 @@ impl OpenTokSinkRemote {
         session_id: &str,
         token: &str,
     ) -> Result<(), Error> {
-        gst::debug!(CAT, "Spawning child process");
-        let mut command = std::process::Command::new("gst-opentok-helper");
+        let helper_exe = match std::env::current_exe() {
+            Ok(mut exe) => {
+                exe.pop();
+                exe.push("gst-opentok-helper");
+                if exe.exists() {
+                    exe.into_os_string().into_string().unwrap()
+                } else {
+                    "gst-opentok-helper".to_string()
+                }
+            }
+            Err(_) => "gst-opentok-helper".to_string(),
+        };
+        gst::error!(CAT, "Spawning child process {helper_exe}");
+        let mut command = std::process::Command::new(helper_exe);
         command
             .arg("--api-key")
             .arg(api_key)
