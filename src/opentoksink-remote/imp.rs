@@ -305,11 +305,11 @@ impl OpenTokSinkRemote {
     }
 
     fn teardown(&self) {
+        self.ipc_thread_running.store(false, Ordering::Relaxed);
         if let Some(sender) = self.ipc_sender.lock().unwrap().take() {
             let msg = IpcMessage::Terminate();
             sender.send(msg).unwrap();
         }
-        self.ipc_thread_running.store(false, Ordering::Relaxed);
     }
 }
 
@@ -655,7 +655,21 @@ impl ElementImpl for OpenTokSinkRemote {
     }
 }
 
-impl BinImpl for OpenTokSinkRemote {}
+impl BinImpl for OpenTokSinkRemote {
+    fn handle_message(&self, message: gst::Message) {
+        if matches!(message.view(), gst::MessageView::Error(..))
+            && !self.ipc_thread_running.load(Ordering::Relaxed)
+        {
+            gst::warning!(
+                CAT,
+                "Dropping error message because IPC thread is not running"
+            );
+            return;
+        }
+
+        self.parent_handle_message(message)
+    }
+}
 
 impl URIHandlerImpl for OpenTokSinkRemote {
     const URI_TYPE: gst::URIType = gst::URIType::Sink;
