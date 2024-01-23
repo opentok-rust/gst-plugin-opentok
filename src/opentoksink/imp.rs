@@ -85,6 +85,9 @@ pub struct OpenTokSink {
     /// You can think of a session as a “room” where clients can interact
     /// with one another in real-time.
     session: Arc<Mutex<Option<Session>>>,
+
+    /// Peer display name.
+    display_name: Arc<Mutex<Option<String>>>,
     /// Boolean flag indicating whether we are connected to a session or not.
     /// No audio or video can be published until the session is connected.
     session_connected: Arc<AtomicBool>,
@@ -297,7 +300,14 @@ impl OpenTokSink {
             let publisher = Publisher::new_with_settings(
                 None,
                 PublisherSettingsBuilder::new()
-                    .name("opentoksink")
+                    .name(
+                        &self
+                            .display_name
+                            .lock()
+                            .unwrap()
+                            .clone()
+                            .unwrap_or_else(|| "opentoksink".into()),
+                    )
                     .video_track(false)
                     .build(),
             );
@@ -396,7 +406,17 @@ impl OpenTokSink {
                 );
             }))
             .build();
-        let publisher = Publisher::new("opentoksink", Some(video_capturer), publisher_callbacks);
+
+        let publisher = Publisher::new(
+            &self
+                .display_name
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| "opentoksink".into()),
+            Some(video_capturer),
+            publisher_callbacks,
+        );
 
         if let Some(ref session) = *self.session.lock().unwrap() {
             if self.session_connected.load(Ordering::Relaxed) {
@@ -589,59 +609,33 @@ impl ObjectImpl for OpenTokSink {
     fn properties() -> &'static [glib::ParamSpec] {
         static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
             vec![
-                glib::ParamSpecString::builder(
-                    "api-key",
-                )
-                .flags(
-                    glib::ParamFlags::WRITABLE,
-                )
-                .build(),
-                glib::ParamSpecString::builder(
-                    "location")
-                .blurb(
-                    "OpenTok session location (i.e. opentok://<session id>?key=<api key>&token=<token>)",
-                )
-                .flags(glib::ParamFlags::READWRITE)
-                .build(),
-                glib::ParamSpecString::builder(
-                    "session-id"
-                )
-                .blurb(
-                    "OpenTok session unique identifier",
-                ).flags(
-                    glib::ParamFlags::WRITABLE,
-                )
-                .build(),
-                glib::ParamSpecString::builder(
-                    "stream-id",
-                )
-                .blurb(
-                    "Unique identifier of the OpenTok stream this sink is publishing",
-                )
-                .flags(
-                    glib::ParamFlags::READABLE,
-                )
-                .build(),
-                glib::ParamSpecString::builder(
-                    "token"
-                )
-                .blurb(
-                    "OpenTok session token",
-                )
-                .flags(
-                    glib::ParamFlags::WRITABLE,
-                )
-                .build(),
-                glib::ParamSpecString::builder(
-                    "demo-room-uri",
-                )
-                .blurb(
-                    "URI of the opentok demo room, eg. https://opentokdemo.tokbox.com/room/rust345",
-                )
-                .flags(
-                    glib::ParamFlags::READWRITE,
-                )
-                .build(),
+                glib::ParamSpecString::builder("api-key")
+                    .flags(glib::ParamFlags::WRITABLE)
+                    .build(),
+                glib::ParamSpecString::builder("location")
+                    .blurb("OpenTok session location (i.e. opentok://<session id>?key=<api key>&token=<token>)")
+                    .flags(glib::ParamFlags::READWRITE)
+                    .build(),
+                glib::ParamSpecString::builder("session-id")
+                    .blurb("OpenTok session unique identifier")
+                    .flags(glib::ParamFlags::WRITABLE)
+                    .build(),
+                glib::ParamSpecString::builder("stream-id")
+                    .blurb("Unique identifier of the OpenTok stream this sink is publishing")
+                    .flags(glib::ParamFlags::READABLE)
+                    .build(),
+                glib::ParamSpecString::builder("token")
+                    .blurb("OpenTok session token")
+                    .flags( glib::ParamFlags::WRITABLE)
+                    .build(),
+                glib::ParamSpecString::builder("demo-room-uri")
+                    .blurb("URI of the opentok demo room, eg. https://opentokdemo.tokbox.com/room/rust345")
+                    .flags(glib::ParamFlags::READWRITE)
+                    .build(),
+                glib::ParamSpecString::builder("display-name")
+                    .blurb("Peer display name")
+                    .flags(glib::ParamFlags::READWRITE)
+                    .build(),
             ]
         });
 
@@ -686,6 +680,9 @@ impl ObjectImpl for OpenTokSink {
                         .set_room_uri(value.get::<String>().expect("expected a string")),
                 );
             }
+            "display-name" => {
+                *self.display_name.lock().unwrap() = value.get::<Option<String>>().unwrap()
+            }
             _ => unimplemented!(),
         }
         if let Err(e) = self.maybe_init_session() {
@@ -715,6 +712,7 @@ impl ObjectImpl for OpenTokSink {
                 .clone()
                 .unwrap_or_else(|| "".into())
                 .to_value(),
+            "display-name" => self.display_name.lock().unwrap().to_value(),
             _ => unimplemented!(),
         }
     }

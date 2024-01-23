@@ -2,10 +2,19 @@ use crate::common::IpcMessage;
 use anyhow::Result;
 use async_std::prelude::*;
 use gst::{glib, prelude::*};
+use once_cell::sync::Lazy;
 use signal_hook::consts::signal::*;
 use signal_hook_async_std::Signals;
 use std::io::Error;
 use std::sync::Arc;
+
+static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
+    gst::DebugCategory::new(
+        "opentoksink-remote-helper",
+        gst::DebugColorFlags::empty(),
+        Some("OpenTok Sink Remote helper"),
+    )
+});
 
 #[path = "./cli.rs"]
 mod cli;
@@ -54,6 +63,11 @@ fn create_pipeline(settings: cli::Settings) -> Result<(gst::Pipeline, Arc<dyn Ip
 
     if let Some(ref stream_id) = settings.stream_id {
         element.set_property("stream-id", stream_id);
+    }
+
+    gst::debug!(CAT, "display_name: {:?}", settings.display_name);
+    if let Some(ref display_name) = settings.display_name {
+        element.set_property("display-name", display_name);
     }
 
     pipeline.add(&element)?;

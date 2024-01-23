@@ -94,6 +94,8 @@ pub struct OpenTokSinkRemote {
     /// OpenTok Stream identifier.
     /// We will be connecting to this stream only.
     stream_id: OnceCell<String>,
+    /// Peer display name.
+    display_name: Arc<Mutex<Option<String>>>,
     /// IPC sender to communicate with the child process.
     ipc_sender: Arc<Mutex<Option<IpcSender<IpcMessage>>>>,
     /// Published stream unique identifier.
@@ -187,6 +189,9 @@ impl OpenTokSinkRemote {
             .arg(ipc_server_name);
         if let Some(stream_id) = self.stream_id.get() {
             command.arg("--stream-id").arg(stream_id);
+        }
+        if let Some(display_name) = self.display_name.lock().unwrap().as_ref() {
+            command.arg("--display-name").arg(display_name);
         }
         *self.child_process.lock().unwrap() = Some(
             command
@@ -334,32 +339,22 @@ impl ObjectImpl for OpenTokSinkRemote {
     fn properties() -> &'static [glib::ParamSpec] {
         static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
             vec![
-                glib::ParamSpecString::builder(
-                    "location",
-                )
-                .blurb(
-                    "OpenTok session location (i.e. opentok-remote://<session id>/key=<api key>&token=<token>)",
-                )
-                .build(),
+                glib::ParamSpecString::builder( "location")
+                    .blurb( "OpenTok session location (i.e. opentok-remote://<session id>/key=<api key>&token=<token>)")
+                    .build(),
                 glib::ParamSpecString::builder("stream-id")
-                    .blurb(
-                        "Unique identifier of the OpenTok stream this sink is publishing",
-                    )
-                    .flags(
-                        glib::ParamFlags::READABLE,
-                    )
+                    .blurb( "Unique identifier of the OpenTok stream this sink is publishing")
+                    .flags( glib::ParamFlags::READABLE)
                     .build(),
-                glib::ParamSpecString::builder(
-                    "demo-room-uri",
-                )
-                    .blurb(
-                        "URI of the opentok demo room, eg. https://opentokdemo.tokbox.com/room/rust345",
-                    )
-                    .flags(
-                        glib::ParamFlags::READWRITE,
-                    )
+                glib::ParamSpecString::builder( "demo-room-uri")
+                    .blurb( "URI of the opentok demo room, eg. https://opentokdemo.tokbox.com/room/rust345")
+                    .flags( glib::ParamFlags::READWRITE)
                     .build(),
-        ]
+                glib::ParamSpecString::builder("display-name")
+                    .blurb("Peer display name")
+                    .flags(glib::ParamFlags::READWRITE)
+                    .build(),
+            ]
         });
 
         PROPERTIES.as_ref()
@@ -388,6 +383,9 @@ impl ObjectImpl for OpenTokSinkRemote {
                         .set_room_uri(value.get::<String>().expect("expected a string")),
                 );
             }
+            "display-name" => {
+                *self.display_name.lock().unwrap() = value.get::<Option<String>>().unwrap()
+            }
             _ => unimplemented!(),
         }
     }
@@ -409,6 +407,7 @@ impl ObjectImpl for OpenTokSinkRemote {
                 .room_uri()
                 .map(|url| url.as_str())
                 .to_value(),
+            "display-name" => self.display_name.lock().unwrap().to_value(),
             _ => unimplemented!(),
         }
     }

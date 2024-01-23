@@ -9,7 +9,7 @@
 
 use crate::common::Credentials;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Direction {
     Source,
     Sink,
@@ -21,6 +21,7 @@ pub struct Settings {
     pub stream_id: Option<String>,
     pub ipc_server: String,
     pub direction: Direction,
+    pub display_name: Option<String>,
 }
 
 pub async fn parse_cli() -> Option<Settings> {
@@ -86,11 +87,13 @@ pub async fn parse_cli() -> Option<Settings> {
     };
 
     let stream_id = matches.value_of("stream_id").map(|s| s.into());
+    let display_name = matches.value_of("display_name").map(|s| s.into());
 
     Some(Settings {
         credentials,
         stream_id,
         ipc_server,
         direction,
+        display_name,
     })
 }

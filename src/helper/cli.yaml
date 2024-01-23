@@ -25,9 +25,13 @@ args:
   - direction:
       long: direction
       help: Should the program emit or receive data
-      possible_values: [ src, sink ]
+      possible_values: [src, sink]
       takes_value: true
   - room_uri:
       long: room-uri
       help: Room uri
+      takes_value: true
+  - display_name:
+      long: display-name
+      help: Peer display name
       takes_value: true
