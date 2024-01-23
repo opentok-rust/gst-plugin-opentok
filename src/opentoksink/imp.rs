@@ -294,11 +294,46 @@ impl OpenTokSink {
 
         gst::debug!(CAT, imp: self, "Initializing publisher");
 
+        let credentials = &self.credentials;
+        let published_stream_id = &self.published_stream_id;
+        let signal_emitter = &self.signal_emitter;
+        let publisher_callbacks = PublisherCallbacks::builder()
+            .on_stream_created(clone!(
+                @weak self as this,
+                @weak credentials,
+                @weak published_stream_id,
+                @weak signal_emitter,
+            => move |_, stream| {
+                *published_stream_id.lock().unwrap() = Some(stream.id());
+                let credentials = credentials.lock().unwrap().clone();
+                let url = format!("opentok://{}/{}?key={}&token={}",
+                                  credentials.session_id().unwrap(),
+                                  stream.id(),
+                                  credentials.api_key().unwrap(),
+                                  credentials.token().unwrap()
+                );
+                signal_emitter.lock().unwrap().as_ref().unwrap().emit_published_stream(&stream.id(), &url);
+            }))
+            .on_error(clone!(
+                @weak self as this,
+            => move |_, error, _| {
+                gst::error!(CAT, imp: this, "Publisher error {}", error,);
+                this.obj().post_error_message(
+                    gst::error_msg!(
+                        gst::LibraryError::Failed,
+                        [
+                            format!("Failed to start publishing stream: {:?}", error).as_ref()
+                        ]
+                    )
+                );
+            }))
+            .build();
+
         if self.video_sink.lock().unwrap().is_none() {
             gst::info!(CAT, imp: self, "No video sink, not publishing video");
 
             let publisher = Publisher::new_with_settings(
-                None,
+                Some(publisher_callbacks),
                 PublisherSettingsBuilder::new()
                     .name(
                         &self
@@ -319,8 +354,6 @@ impl OpenTokSink {
             return;
         }
 
-        let credentials = &self.credentials;
-        let published_stream_id = &self.published_stream_id;
         let video_sink = &self.video_sink;
         let video_capturer = &self.video_capturer;
         let video_capturer_callbacks = VideoCapturerCallbacks::builder()
@@ -372,40 +405,6 @@ impl OpenTokSink {
 
         let video_capturer = VideoCapturer::new(settings, video_capturer_callbacks);
         gst::debug!(CAT, imp: self, "Video capturer created");
-
-        let signal_emitter = &self.signal_emitter;
-        let publisher_callbacks = PublisherCallbacks::builder()
-            .on_stream_created(clone!(
-                @weak self as this,
-                @weak credentials,
-                @weak published_stream_id,
-                @weak signal_emitter,
-            => move |_, stream| {
-                *published_stream_id.lock().unwrap() = Some(stream.id());
-                let credentials = credentials.lock().unwrap().clone();
-                let url = format!("opentok://{}/{}?key={}&token={}",
-                                  credentials.session_id().unwrap(),
-                                  stream.id(),
-                                  credentials.api_key().unwrap(),
-                                  credentials.token().unwrap()
-                );
-                signal_emitter.lock().unwrap().as_ref().unwrap().emit_published_stream(&stream.id(), &url);
-                gst::info!(CAT, imp: this, "Publisher stream created {}. Url {}", stream.id(), url);
-            }))
-            .on_error(clone!(
-                @weak self as this,
-            => move |_, error, _| {
-                gst::error!(CAT, imp: this, "Publisher error {}", error,);
-                this.obj().post_error_message(
-                    gst::error_msg!(
-                        gst::LibraryError::Failed,
-                        [
-                            format!("Failed to start publishing stream: {:?}", error).as_ref()
-                        ]
-                    )
-                );
-            }))
-            .build();
 
         let publisher = Publisher::new(
             &self
