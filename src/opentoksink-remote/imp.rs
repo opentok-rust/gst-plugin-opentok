@@ -250,9 +250,16 @@ impl OpenTokSinkRemote {
         => move || {
             gst::debug!(CAT, imp: this, "IPC thread running");
             ipc_thread_running.store(true, Ordering::Relaxed);
+            let mut last_pong = std::time::Instant::now();
+            let mut last_ping_sent = std::time::Instant::now();
             loop {
                 if !ipc_thread_running.load(Ordering::Relaxed) {
                     break;
+                }
+                if last_ping_sent.elapsed().as_secs() > 1 {
+                    gst::log!(CAT, imp: this, "Sending PING");
+                    last_ping_sent = std::time::Instant::now();
+                    this.ipc_sender.lock().unwrap().as_ref().unwrap().send(IpcMessage::Ping).unwrap();
                 }
                 match ipc_receiver.try_recv() {
                     Ok(message) => {
@@ -265,6 +272,10 @@ impl OpenTokSinkRemote {
                                     &child_process
                                 );
                                 break;
+                            },
+                            IpcMessage::Pong => {
+                                gst::log!(CAT, "Got pong");
+                                last_pong = std::time::Instant::now();
                             },
                             IpcMessage::PublishedStream(stream_id) => {
                                 if let Some(signal_emitter) = signal_emitter.lock().unwrap().as_ref() {
@@ -283,7 +294,18 @@ impl OpenTokSinkRemote {
                             _ => {},
                         }
                     },
-                    Err(_) => std::thread::sleep(std::time::Duration::from_micros(10000)),
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_micros(10000));
+                        if last_pong.elapsed().as_secs() > 5 {
+                            gst::error!(CAT, "No pong for 5sec, posting error");
+                            OpenTokSinkRemote::critical_error(
+                                "No pong for 5seconds",
+                                this.obj().upcast_ref(),
+                                &child_process
+                            );
+                            break;
+                        }
+                    }
                 }
             }
             gst::debug!(CAT, imp: this, "IPC thread exiting");
