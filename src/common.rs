@@ -60,6 +60,8 @@ pub enum IpcMessage {
     Error(String),
     PublishedStream(String),
     Stream(StreamMessage),
+    Ping,
+    Pong,
     Terminate(),
 }
 

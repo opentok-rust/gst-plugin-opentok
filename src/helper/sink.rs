@@ -17,10 +17,15 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use crate::helper::CAT;
+
 use crate::common::{Error, IpcMessage, StreamMessage, StreamMessageData};
 use crate::helper::{IpcMessenger, Stream};
 
 use crate::helper::cli;
+
+static CONTROL_THREAD_TIMEOUT_SECS: u64 = 5;
+static RECEIVING_WAIT_USEC: u64 = 10000;
 
 pub struct Sink {
     ipc_sender: Arc<Mutex<IpcSender<IpcMessage>>>,
@@ -140,7 +145,7 @@ impl Sink {
                         _ => {}
                     },
                     Err(_) => {
-                        std::thread::sleep(std::time::Duration::from_micros(10000));
+                        std::thread::sleep(std::time::Duration::from_micros(RECEIVING_WAIT_USEC));
                     }
                 }
             }
@@ -164,8 +169,10 @@ impl Sink {
 
         let pipeline_weak = pipeline.downgrade();
         // Control thread
+        let child_to_parent_ipc_sender = Arc::new(Mutex::new(child_to_parent_ipc_sender));
+        let ipc_sender = child_to_parent_ipc_sender.clone();
         thread::spawn(move || {
-            debug!("Control thread running");
+            gst::debug!(CAT, "Starting control thread");
 
             let (parent_to_child_ipc_sender, parent_to_child_ipc_receiver) =
                 ipc::channel().unwrap();
@@ -176,10 +183,11 @@ impl Sink {
             }
 
             let pipeline = pipeline_weak.upgrade().unwrap();
+            let mut last_ping = std::time::Instant::now();
             loop {
                 match parent_to_child_ipc_receiver.try_recv() {
                     Ok(message) => {
-                        debug!("IPC message received: {:?}", message);
+                        gst::log!(CAT, "IPC message received: {:?}", message);
                         match message {
                             IpcMessage::Stream(stream_message) => match stream_message {
                                 StreamMessage::Audio(message) => {
@@ -190,12 +198,29 @@ impl Sink {
                                 }
                             },
                             IpcMessage::Terminate() => {
-                                pipeline.send_event(gst::event::Eos::new());
+                                gst::log!(CAT, "Received terminate message");
+                                pipeline.set_state(gst::State::Null).unwrap();
+                            }
+                            IpcMessage::Ping => {
+                                gst::log!(CAT, "Got ping");
+                                last_ping = std::time::Instant::now();
+
+                                ipc_sender.lock().unwrap().send(IpcMessage::Pong).unwrap();
                             }
                             _ => {}
                         }
                     }
-                    Err(_) => std::thread::sleep(std::time::Duration::from_micros(10000)),
+                    Err(_) => {
+                        if last_ping.elapsed().as_secs() > CONTROL_THREAD_TIMEOUT_SECS {
+                            gst::error!(
+                                CAT,
+                                "No ping for {CONTROL_THREAD_TIMEOUT_SECS}sec, exiting process"
+                            );
+
+                            std::process::exit(1);
+                        }
+                        std::thread::sleep(std::time::Duration::from_micros(RECEIVING_WAIT_USEC))
+                    }
                 }
             }
         });
@@ -204,7 +229,6 @@ impl Sink {
 
         Sink::spawn_stream_thread("Video".into(), video_thread_receiver, pipeline, opentoksink);
 
-        let child_to_parent_ipc_sender = Arc::new(Mutex::new(child_to_parent_ipc_sender));
         let ipc_sender = child_to_parent_ipc_sender.clone();
         opentoksink.connect("published-stream", false, move |args| {
             if let Ok(stream_id) = args[1].get::<String>() {
