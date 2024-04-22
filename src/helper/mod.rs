@@ -59,7 +59,7 @@ fn create_pipeline(settings: cli::Settings) -> Result<(gst::Pipeline, Arc<dyn Ip
         cli::Direction::Sink => gst::URIType::Sink,
     };
 
-    let element = gst::Element::make_from_uri(uri_type, &location, Some("opentok-element"))?;
+    let element = gst::Element::make_from_uri(uri_type, &location, None)?;
 
     if let Some(ref stream_id) = settings.stream_id {
         element.set_property("stream-id", stream_id);
@@ -100,7 +100,8 @@ fn run_main_loop(
             MessageView::Eos(..) => main_loop.quit(),
             MessageView::Error(err) => {
                 ipc_messenger.send(IpcMessage::Error(err.error().to_string()));
-                eprintln!(
+                gst::info!(
+                    CAT,
                     "Error from {:?}: {} ({:?})",
                     err.src().map(|s| s.path_string()),
                     err.error(),
