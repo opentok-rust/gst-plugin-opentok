@@ -59,7 +59,7 @@ fn create_pipeline(settings: cli::Settings) -> Result<(gst::Pipeline, Arc<dyn Ip
         cli::Direction::Sink => gst::URIType::Sink,
     };
 
-    let element = gst::Element::make_from_uri(uri_type, &location, None)?;
+    let element = gst::Element::make_from_uri(uri_type, &location, Some("opentok-element"))?;
 
     if let Some(ref stream_id) = settings.stream_id {
         element.set_property("stream-id", stream_id);
