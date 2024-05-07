@@ -138,7 +138,9 @@ fn run_main_loop(
     pipeline.set_state(gst::State::Ready)?;
     main_loop.run();
 
-    bus.post(gst::message::Eos::new()).unwrap();
+    if let Err(e) = bus.post(gst::message::Eos::new()) {
+        gst::error!(CAT, "Failed to post EOS message: {}", e);
+    }
 
     pipeline.set_state(gst::State::Null)?;
     bus.remove_watch()?;

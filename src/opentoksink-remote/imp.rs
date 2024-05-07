@@ -330,7 +330,9 @@ impl OpenTokSinkRemote {
         self.ipc_thread_running.store(false, Ordering::Relaxed);
         if let Some(sender) = self.ipc_sender.lock().unwrap().take() {
             let msg = IpcMessage::Terminate();
-            sender.send(msg).unwrap();
+            if let Err(err) = sender.send(msg) {
+                gst::error!(CAT, "Could not send message to child process: {:?}", err);
+            }
         }
     }
 }
