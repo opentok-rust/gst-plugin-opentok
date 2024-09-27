@@ -93,7 +93,9 @@ impl Sink {
 
         pad.link(&sink_pad).unwrap();
 
-        pipeline.set_state(gst::State::Playing).unwrap();
+        pipeline.set_state(gst::State::Playing).map_err(|e| {
+            Error::StateChangeError(format!("{e:?}"))
+        })?;
 
         bin.sync_state_with_parent().unwrap();
         opentoksink.sync_state_with_parent().unwrap();

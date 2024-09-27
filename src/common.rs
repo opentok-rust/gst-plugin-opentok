@@ -37,7 +37,9 @@ pub enum Error {
     Init(String),
     #[error("Invalid state: {0}")]
     InvalidState(&'static str),
-    #[error("Cannot link elements: {0}")]
+    #[error("Invalid state: {0}")]
+    StateChangeError(String),
+    #[error("Could not set state: {0}")]
     LinkElements(&'static str),
     #[error("Missing element {0}. Check your GStreamer installation")]
     MissingElement(&'static str),

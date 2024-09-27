@@ -258,12 +258,13 @@ impl OpenTokSrcRemote {
         if let Some(mut child_process) = child_process.lock().unwrap().take() {
             let _ = child_process.interrupt();
         }
-        element
+        if let Err(err)  = element
             .post_message(gst::message::Error::new(
                 gst::CoreError::Failed,
                 &format!("Child process error {}", error),
-            ))
-            .unwrap();
+            )) {
+                gst::error!(CAT, "Could not post error message: {err:?}");
+            }
     }
 
     fn init(&self) -> Result<(), Error> {
@@ -293,7 +294,18 @@ impl OpenTokSrcRemote {
             @weak aux_threads_running,
         => move || {
             gst::debug!(CAT, imp: this, "Control thread running");
-            let (_, ipc_receiver) = ipc_server.accept().unwrap();
+            let (_, ipc_receiver) = match ipc_server.accept() {
+                Ok(r) => r,
+                Err(err) => {
+                    OpenTokSrcRemote::critical_error(
+                        &format!("Could not start IPC: {:?}", err),
+                        this.obj().upcast_ref(),
+                        &child_process,
+                    );
+
+                    return;
+                }
+            };
             gst::debug!(CAT, imp: this, "Got IPC receiver");
             loop {
                 if !aux_threads_running.load(Ordering::Relaxed) {
@@ -366,8 +378,12 @@ impl OpenTokSrcRemote {
                                 "audio_stream",
                                 socket_path,
                             ) {
-                                Ok(()) => ipc_sender.send(()).unwrap(),
-                                Err(err) => OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process),
+                                Ok(()) => {
+                                    if let Err(err) = ipc_sender.send(()) {
+                                        OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process);
+                                    }
+                                }
+                                Err(err) => OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process)
                             }
                         },
                         _ => {}
@@ -411,7 +427,11 @@ impl OpenTokSrcRemote {
                                 "video_stream",
                                 socket_path,
                             ) {
-                                Ok(()) => ipc_sender.send(()).unwrap(),
+                                Ok(()) => {
+                                    if let Err(err) = ipc_sender.send(()) {
+                                        OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process);
+                                    }
+                                }
                                 Err(err) => OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process),
                             }
                         },
