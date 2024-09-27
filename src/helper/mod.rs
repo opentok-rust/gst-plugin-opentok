@@ -138,7 +138,7 @@ fn run_main_loop(
     pipeline.set_state(gst::State::Ready)?;
     main_loop.run();
 
-    bus.post(gst::message::Eos::new()).unwrap();
+    bus.post(gst::message::Eos::new())?;
 
     pipeline.set_state(gst::State::Null)?;
     bus.remove_watch()?;
