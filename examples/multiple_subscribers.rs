@@ -73,7 +73,7 @@ fn create_subscriber(pipeline: &gst::Pipeline, credentials: &cli::Credentials, s
         pipeline.add(&bin).unwrap();
 
         let sink_pad = queue.static_pad("sink").unwrap();
-        let bin_sink_pad = gst::GhostPad::with_target(None, &sink_pad).unwrap();
+        let bin_sink_pad = gst::GhostPad::with_target(&sink_pad).unwrap();
         bin_sink_pad.set_active(true).unwrap();
         bin.add_pad(&bin_sink_pad).unwrap();
         pad.link(&bin_sink_pad).unwrap();
@@ -92,9 +92,7 @@ fn create_subscriber(pipeline: &gst::Pipeline, credentials: &cli::Credentials, s
                 bin.set_state(gst::State::Null).unwrap();
                 let _ = bin.state(None);
                 pipeline.remove(bin).unwrap();
-                let bin_ref = pipeline.upcast_ref::<gst::Bin>();
-                gst::debug_bin_to_dot_file_with_ts(
-                    bin_ref,
+                pipeline.debug_to_dot_file_with_ts(
                     gst::DebugGraphDetails::all(),
                     format!("{}_removed", pad.name()),
                 );
@@ -107,7 +105,7 @@ fn create_subscriber(pipeline: &gst::Pipeline, credentials: &cli::Credentials, s
 fn create_pipeline(settings: cli::Settings) -> Result<gst::Pipeline> {
     gst::init()?;
 
-    let pipeline = gst::Pipeline::new(None);
+    let pipeline = gst::Pipeline::new();
 
     if settings.stream_ids.is_empty() {
         eprintln!("Missing stream ids");
@@ -136,54 +134,52 @@ fn main_loop(pipeline: gst::Pipeline) -> Result<()> {
 
     let pipeline_ = pipeline.downgrade();
     let main_loop_clone = main_loop.clone();
-    bus.add_watch(move |_, msg| {
-        use gst::MessageView;
+    let _bus_watch = bus
+        .add_watch(move |_, msg| {
+            use gst::MessageView;
 
-        let main_loop = &main_loop_clone;
+            let main_loop = &main_loop_clone;
 
-        match msg.view() {
-            MessageView::Eos(..) => main_loop.quit(),
-            MessageView::Error(err) => {
-                eprintln!(
-                    "Error from {:?}: {} ({:?})",
-                    err.src().map(|s| s.path_string()),
-                    err.error(),
-                    err.debug()
-                );
-
-                main_loop.quit();
-            }
-            MessageView::StateChanged(state) => {
-                let pipeline = pipeline_.upgrade().unwrap();
-                if state
-                    .src()
-                    .map(|s| s == pipeline.upcast_ref::<gst::Object>())
-                    .unwrap_or(false)
-                {
-                    let bin_ref = pipeline.upcast_ref::<gst::Bin>();
-                    gst::debug_bin_to_dot_file_with_ts(
-                        bin_ref,
-                        gst::DebugGraphDetails::all(),
-                        format!(
-                            "subscriber_state_changed_{:?}_{:?}",
-                            state.old(),
-                            state.current()
-                        ),
+            match msg.view() {
+                MessageView::Eos(..) => main_loop.quit(),
+                MessageView::Error(err) => {
+                    eprintln!(
+                        "Error from {:?}: {} ({:?})",
+                        err.src().map(|s| s.path_string()),
+                        err.error(),
+                        err.debug()
                     );
+
+                    main_loop.quit();
                 }
+                MessageView::StateChanged(state) => {
+                    let pipeline = pipeline_.upgrade().unwrap();
+                    if state
+                        .src()
+                        .map(|s| s == pipeline.upcast_ref::<gst::Object>())
+                        .unwrap_or(false)
+                    {
+                        pipeline.debug_to_dot_file_with_ts(
+                            gst::DebugGraphDetails::all(),
+                            format!(
+                                "subscriber_state_changed_{:?}_{:?}",
+                                state.old(),
+                                state.current()
+                            ),
+                        );
+                    }
+                }
+                _ => (),
             }
-            _ => (),
-        }
-        glib::Continue(true)
-    })
-    .expect("Failed to add bus watch");
+            glib::ControlFlow::Continue
+        })
+        .expect("Failed to add bus watch");
 
     pipeline.set_state(gst::State::Paused)?;
     main_loop.run();
 
     bus.post(gst::message::Eos::new()).unwrap();
     pipeline.set_state(gst::State::Null)?;
-    bus.remove_watch()?;
 
     Ok(())
 }

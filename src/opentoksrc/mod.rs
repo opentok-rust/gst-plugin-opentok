@@ -12,7 +12,7 @@ use gst::glib::{self, prelude::*};
 mod imp;
 
 glib::wrapper! {
-    pub struct OpenTokSrc(ObjectSubclass<imp::OpenTokSrc>) @extends gst::Bin, gst::Element, gst::Object;
+    pub struct OpenTokSrc(ObjectSubclass<imp::OpenTokSrc>) @extends gst::Bin, gst::Element, gst::Object, @implements gst::URIHandler;
 }
 
 unsafe impl Send for OpenTokSrc {}
@@ -22,7 +22,7 @@ pub fn register(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
     gst::Element::register(
         Some(plugin),
         "opentoksrc",
-        gst::Rank::None,
+        gst::Rank::NONE,
         OpenTokSrc::static_type(),
     )
 }

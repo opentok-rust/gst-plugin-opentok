@@ -10,7 +10,7 @@
 use crate::common::{caps, Credentials, Error, IpcMessage, StreamMessage, StreamMessageData};
 
 use gst::glib::subclass::prelude::*;
-use gst::glib::{self, clone, ToValue};
+use gst::glib::{self, clone};
 use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst_app::prelude::BaseTransformExt;
@@ -146,7 +146,7 @@ impl OpenTokSrcRemote {
     ) -> Result<(), Error> {
         gst::trace!(
             CAT,
-            imp: self,
+            imp = self,
             "Initializing pipeline for {:?} with socket path {:?}",
             stream_type,
             socket_path
@@ -188,16 +188,18 @@ impl OpenTokSrcRemote {
             .map_err(|_| Error::LinkElements("shmsrc ! capsfilter"))?;
 
         let target_src_pad = capsfilter.static_pad("src").unwrap();
-        let pad = gst::GhostPad::with_target(Some("src"), &target_src_pad).unwrap();
+        let pad = gst::GhostPad::with_target(&target_src_pad).unwrap();
 
         if let Err(err) = bin.add_pad(&pad) {
-            gst::error!(CAT, imp: self, "Failed to add pad {:?}", err);
+            gst::error!(CAT, imp = self, "Failed to add pad {:?}", err);
         }
 
         self.obj().add(&bin).unwrap();
 
-        let bin_src_pad =
-            gst::GhostPad::from_template_with_target(pad_template, Some(&pad_name), &pad).unwrap();
+        let bin_src_pad = gst::GhostPad::builder_from_template_with_target(pad_template, &pad)
+            .unwrap()
+            .name(pad_name)
+            .build();
         self.obj().add_pad(&bin_src_pad).unwrap();
         bin.sync_state_with_parent().unwrap();
         Ok(())
@@ -206,7 +208,7 @@ impl OpenTokSrcRemote {
     fn remove_stream(&self, stream_name: &str, socket_path: String) -> Result<(), Error> {
         gst::debug!(
             CAT,
-            imp: self,
+            imp = self,
             "Removing {} with socket path {}",
             stream_name,
             socket_path
@@ -226,7 +228,7 @@ impl OpenTokSrcRemote {
 
             let pad = self.obj().static_pad(stream_name).unwrap();
             toplevel_bin.remove_pad(&pad).unwrap();
-            gst::debug!(CAT, imp: self, "Removed pad {}", stream_name,);
+            gst::debug!(CAT, imp = self, "Removed pad {}", stream_name,);
         }
 
         Ok(())
@@ -254,7 +256,7 @@ impl OpenTokSrcRemote {
         element: &gst::Element,
         child_process: &Arc<Mutex<Option<Child>>>,
     ) {
-        gst::error!(CAT, obj: element, "{}", error);
+        gst::error!(CAT, obj = element, "{}", error);
         if let Some(mut child_process) = child_process.lock().unwrap().take() {
             let _ = child_process.interrupt();
         }
@@ -288,163 +290,208 @@ impl OpenTokSrcRemote {
 
         // Control thread
         thread::spawn(clone!(
-            @weak self as this,
-            @weak child_process,
-            @weak aux_threads_running,
-        => move || {
-            gst::debug!(CAT, imp: this, "Control thread running");
-            let (_, ipc_receiver) = match ipc_server.accept() {
-                Ok(r) => r,
-                Err(err) => {
-                    OpenTokSrcRemote::critical_error(
-                        &format!("Could not start IPC: {:?}", err),
-                        this.obj().upcast_ref(),
-                        &child_process,
-                    );
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            child_process,
+            #[weak]
+            aux_threads_running,
+            move || {
+                gst::debug!(CAT, imp = this, "Control thread running");
+                let (_, ipc_receiver) = match ipc_server.accept() {
+                    Ok(r) => r,
+                    Err(err) => {
+                        OpenTokSrcRemote::critical_error(
+                            &format!("Could not start IPC: {:?}", err),
+                            this.obj().upcast_ref(),
+                            &child_process,
+                        );
 
-                    return;
-                }
-            };
-            gst::debug!(CAT, imp: this, "Got IPC receiver");
-            loop {
-                if !aux_threads_running.load(Ordering::Relaxed) {
-                    break;
-                }
-                match ipc_receiver.try_recv() {
-                    Ok(message) => {
-                        gst::debug!(CAT, imp: this, "IPC message received: {:?}", message);
-                        match message {
-                            IpcMessage::Error(err) => {
-                                OpenTokSrcRemote::critical_error(
-                                    &err,
-                                    this.obj().upcast_ref(),
-                                    &child_process,
-                                );
-                                break;
-                            },
-                            IpcMessage::Stream(stream_message) => {
-                                match stream_message {
-                                    StreamMessage::Audio(message) => audio_thread_sender
-                                        .lock()
-                                        .unwrap()
-                                        .send(message)
-                                        .unwrap(),
-                                    StreamMessage::Video(message) => video_thread_sender
-                                        .lock()
-                                        .unwrap()
-                                        .send(message)
-                                        .unwrap(),
+                        return;
+                    }
+                };
+                gst::debug!(CAT, imp = this, "Got IPC receiver");
+                loop {
+                    if !aux_threads_running.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    match ipc_receiver.try_recv() {
+                        Ok(message) => {
+                            gst::debug!(CAT, imp = this, "IPC message received: {:?}", message);
+                            match message {
+                                IpcMessage::Error(err) => {
+                                    OpenTokSrcRemote::critical_error(
+                                        &err,
+                                        this.obj().upcast_ref(),
+                                        &child_process,
+                                    );
+                                    break;
                                 }
-                            },
-                            _ => {},
+                                IpcMessage::Stream(stream_message) => match stream_message {
+                                    StreamMessage::Audio(message) => {
+                                        audio_thread_sender.lock().unwrap().send(message).unwrap()
+                                    }
+                                    StreamMessage::Video(message) => {
+                                        video_thread_sender.lock().unwrap().send(message).unwrap()
+                                    }
+                                },
+                                _ => {}
+                            }
                         }
-                    },
-                    Err(_) => std::thread::sleep(std::time::Duration::from_micros(10000)),
+                        Err(_) => std::thread::sleep(std::time::Duration::from_micros(10000)),
+                    }
                 }
+                gst::debug!(CAT, imp = this, "Control thread exiting");
             }
-            gst::debug!(CAT, imp: this , "Control thread exiting");
-        }));
+        ));
 
         // Audio thread
         let audio_pad_template = &self.audio_src_pad_template;
         thread::spawn(clone!(
-            @weak self as this,
-            @strong audio_pad_template,
-            @weak child_process,
-            @weak aux_threads_running,
-        => move || {
-            gst::debug!(CAT, imp: this , "Audio thread running");
-            loop {
-                if !aux_threads_running.load(Ordering::Relaxed) {
-                    break;
-                }
-                match audio_thread_receiver.try_recv() {
-                    Ok(res) => match res {
-                        StreamMessageData::ShmSocketPathAdded(socket_path, caps, pad_name) => {
-                            gst::debug!(CAT, imp: this , "Audio socket added: {}", &socket_path);
-                            if let Err(err) = this.init_stream_pipeline(
-                                Stream::Audio(caps),
-                                socket_path,
-                                &audio_pad_template,
-                                pad_name,
-                            ) {
-                                OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process);
-                            }
-                        },
-                        StreamMessageData::ShmSocketPathRemoved(socket_path, ipc_sender) => {
-                            gst::debug!(CAT, imp: this, "Audio socket removed: {}", &socket_path);
-                            match this.remove_stream(
-                                "audio_stream",
-                                socket_path,
-                            ) {
-                                Ok(()) => {
-                                    if let Err(err) = ipc_sender.send(()) {
-                                        OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process);
-                                    }
+            #[weak(rename_to = this)]
+            self,
+            #[strong]
+            audio_pad_template,
+            #[weak]
+            child_process,
+            #[weak]
+            aux_threads_running,
+            move || {
+                gst::debug!(CAT, imp = this, "Audio thread running");
+                loop {
+                    if !aux_threads_running.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    match audio_thread_receiver.try_recv() {
+                        Ok(res) => match res {
+                            StreamMessageData::ShmSocketPathAdded(socket_path, caps, pad_name) => {
+                                gst::debug!(
+                                    CAT,
+                                    imp = this,
+                                    "Audio socket added: {}",
+                                    &socket_path
+                                );
+                                if let Err(err) = this.init_stream_pipeline(
+                                    Stream::Audio(caps),
+                                    socket_path,
+                                    &audio_pad_template,
+                                    pad_name,
+                                ) {
+                                    OpenTokSrcRemote::critical_error(
+                                        &err.to_string(),
+                                        this.obj().upcast_ref(),
+                                        &child_process,
+                                    );
                                 }
-                                Err(err) => OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process)
                             }
+                            StreamMessageData::ShmSocketPathRemoved(socket_path, ipc_sender) => {
+                                gst::debug!(
+                                    CAT,
+                                    imp = this,
+                                    "Audio socket removed: {}",
+                                    &socket_path
+                                );
+                                match this.remove_stream("audio_stream", socket_path) {
+                                    Ok(()) => {
+                                        if let Err(err) = ipc_sender.send(()) {
+                                            OpenTokSrcRemote::critical_error(
+                                                &err.to_string(),
+                                                this.obj().upcast_ref(),
+                                                &child_process,
+                                            );
+                                        }
+                                    }
+                                    Err(err) => OpenTokSrcRemote::critical_error(
+                                        &err.to_string(),
+                                        this.obj().upcast_ref(),
+                                        &child_process,
+                                    ),
+                                }
+                            }
+                            _ => {}
                         },
-                        _ => {}
-                    },
-                    Err(_) => {
-                        std::thread::sleep(std::time::Duration::from_micros(10000));
+                        Err(_) => {
+                            std::thread::sleep(std::time::Duration::from_micros(10000));
+                        }
                     }
                 }
+                gst::debug!(CAT, imp = this, "Audio thread exiting");
             }
-            gst::debug!(CAT, imp: this, "Audio thread exiting");
-        }));
+        ));
 
         // Video thread
         let video_pad_template = &self.video_src_pad_template;
         thread::spawn(clone!(
-            @weak self as this,
-            @strong video_pad_template,
-            @weak aux_threads_running,
-        => move || {
-            gst::debug!(CAT, imp: this, "Video thread running");
-            loop {
-                if !aux_threads_running.load(Ordering::Relaxed) {
-                    break;
-                }
-                match video_thread_receiver.try_recv() {
-                    Ok(res) => match res {
-                        StreamMessageData::ShmSocketPathAdded(socket_path, caps, pad_name) => {
-                            gst::debug!(CAT, imp: this, "Video socket added: {}", &socket_path);
-                            if let Err(err) = this.init_stream_pipeline(
-                                Stream::Video(caps),
-                                socket_path,
-                                &video_pad_template,
-                                pad_name,
-                            ) {
-                                OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process)
-                            }
-                        },
-                        StreamMessageData::ShmSocketPathRemoved(socket_path, ipc_sender) => {
-                            gst::debug!(CAT, imp: this, "Video socket removed: {}", &socket_path);
-                            match this.remove_stream(
-                                "video_stream",
-                                socket_path,
-                            ) {
-                                Ok(()) => {
-                                    if let Err(err) = ipc_sender.send(()) {
-                                        OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process);
-                                    }
+            #[weak(rename_to = this)]
+            self,
+            #[strong]
+            video_pad_template,
+            #[weak]
+            aux_threads_running,
+            move || {
+                gst::debug!(CAT, imp = this, "Video thread running");
+                loop {
+                    if !aux_threads_running.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    match video_thread_receiver.try_recv() {
+                        Ok(res) => match res {
+                            StreamMessageData::ShmSocketPathAdded(socket_path, caps, pad_name) => {
+                                gst::debug!(
+                                    CAT,
+                                    imp = this,
+                                    "Video socket added: {}",
+                                    &socket_path
+                                );
+                                if let Err(err) = this.init_stream_pipeline(
+                                    Stream::Video(caps),
+                                    socket_path,
+                                    &video_pad_template,
+                                    pad_name,
+                                ) {
+                                    OpenTokSrcRemote::critical_error(
+                                        &err.to_string(),
+                                        this.obj().upcast_ref(),
+                                        &child_process,
+                                    )
                                 }
-                                Err(err) => OpenTokSrcRemote::critical_error(&err.to_string(), this.obj().upcast_ref(), &child_process),
+                            }
+                            StreamMessageData::ShmSocketPathRemoved(socket_path, ipc_sender) => {
+                                gst::debug!(
+                                    CAT,
+                                    imp = this,
+                                    "Video socket removed: {}",
+                                    &socket_path
+                                );
+                                match this.remove_stream("video_stream", socket_path) {
+                                    Ok(()) => {
+                                        if let Err(err) = ipc_sender.send(()) {
+                                            OpenTokSrcRemote::critical_error(
+                                                &err.to_string(),
+                                                this.obj().upcast_ref(),
+                                                &child_process,
+                                            );
+                                        }
+                                    }
+                                    Err(err) => OpenTokSrcRemote::critical_error(
+                                        &err.to_string(),
+                                        this.obj().upcast_ref(),
+                                        &child_process,
+                                    ),
+                                }
+                            }
+                            StreamMessageData::CapsChanged(caps, pad_name) => {
+                                this.update_caps(caps, pad_name);
                             }
                         },
-                        StreamMessageData::CapsChanged(caps, pad_name) => {
-                            this.update_caps(caps, pad_name);
+                        Err(_) => {
+                            std::thread::sleep(std::time::Duration::from_micros(10000));
                         }
-                    },
-                    Err(_) => {
-                        std::thread::sleep(std::time::Duration::from_micros(10000));
                     }
                 }
+                gst::debug!(CAT, imp = this, "Video thread exiting");
             }
-            gst::debug!(CAT, imp: this, "Video thread exiting");
-        }));
+        ));
 
         Ok(())
     }
@@ -526,12 +573,12 @@ impl ObjectImpl for OpenTokSrcRemote {
     }
 
     fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
-        gst::trace!(CAT, imp: self, "Setting property {:?}", pspec.name());
+        gst::trace!(CAT, imp = self, "Setting property {:?}", pspec.name());
         match pspec.name() {
             "location" => {
                 let location = value.get::<String>().expect("expected a string");
                 if let Err(e) = self.set_location(&location) {
-                    gst::error!(CAT, imp: self, "Failed to set location: {:?}", e)
+                    gst::error!(CAT, imp = self, "Failed to set location: {:?}", e)
                 }
             }
             _ => unimplemented!(),
@@ -592,17 +639,17 @@ impl ElementImpl for OpenTokSrcRemote {
         &self,
         transition: gst::StateChange,
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
-        gst::debug!(CAT, imp: self, "Changing state {:?}", transition);
+        gst::debug!(CAT, imp = self, "Changing state {:?}", transition);
 
         if transition == gst::StateChange::ReadyToNull {
             self.teardown();
         }
         if transition == gst::StateChange::NullToReady {
-            gst::debug!(CAT, imp: self, "OpenTokSrcRemote initialization");
+            gst::debug!(CAT, imp = self, "OpenTokSrcRemote initialization");
             if let Err(e) = self.maybe_init() {
                 gst::error!(
                     CAT,
-                    imp: self,
+                    imp = self,
                     "Failed to initialize OpenTokSourceRemote: {:?}",
                     e
                 )

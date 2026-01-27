@@ -34,7 +34,7 @@ struct ErrorMessage {
 fn create_pipeline(settings: cli::Settings) -> Result<gst::Pipeline> {
     gst::init()?;
 
-    let pipeline = gst::Pipeline::new(None);
+    let pipeline = gst::Pipeline::new();
 
     let videotestsrc = gst::ElementFactory::make("videotestsrc")
         .build()
@@ -125,47 +125,46 @@ fn main_loop(pipeline: gst::Pipeline, settings: cli::Settings) -> Result<()> {
 
     let pipeline_ = pipeline.downgrade();
     let main_loop_clone = main_loop.clone();
-    bus.add_watch(move |_, msg| {
-        use gst::MessageView;
+    let _bus_watch = bus
+        .add_watch(move |_, msg| {
+            use gst::MessageView;
 
-        let main_loop = &main_loop_clone;
+            let main_loop = &main_loop_clone;
 
-        match msg.view() {
-            MessageView::Eos(..) => main_loop.quit(),
-            MessageView::Error(err) => {
-                eprintln!(
-                    "Error from {:?}: {} ({:?})",
-                    err.src().map(|s| s.path_string()),
-                    err.error(),
-                    err.debug()
-                );
-
-                main_loop.quit();
-            }
-            MessageView::StateChanged(state) => {
-                let pipeline = pipeline_.upgrade().unwrap();
-                if state
-                    .src()
-                    .map(|s| s == pipeline.upcast_ref::<gst::Object>())
-                    .unwrap_or(false)
-                {
-                    let bin_ref = pipeline.upcast_ref::<gst::Bin>();
-                    gst::debug_bin_to_dot_file_with_ts(
-                        bin_ref,
-                        gst::DebugGraphDetails::all(),
-                        format!(
-                            "publisher_state_changed_{:?}_{:?}",
-                            state.old(),
-                            state.current()
-                        ),
+            match msg.view() {
+                MessageView::Eos(..) => main_loop.quit(),
+                MessageView::Error(err) => {
+                    eprintln!(
+                        "Error from {:?}: {} ({:?})",
+                        err.src().map(|s| s.path_string()),
+                        err.error(),
+                        err.debug()
                     );
+
+                    main_loop.quit();
                 }
+                MessageView::StateChanged(state) => {
+                    let pipeline = pipeline_.upgrade().unwrap();
+                    if state
+                        .src()
+                        .map(|s| s == pipeline.upcast_ref::<gst::Object>())
+                        .unwrap_or(false)
+                    {
+                        pipeline.debug_to_dot_file_with_ts(
+                            gst::DebugGraphDetails::all(),
+                            format!(
+                                "publisher_state_changed_{:?}_{:?}",
+                                state.old(),
+                                state.current()
+                            ),
+                        );
+                    }
+                }
+                _ => (),
             }
-            _ => (),
-        }
-        glib::Continue(true)
-    })
-    .expect("Failed to add bus watch");
+            glib::ControlFlow::Continue
+        })
+        .expect("Failed to add bus watch");
 
     pipeline.set_state(gst::State::Playing)?;
 
@@ -180,7 +179,6 @@ fn main_loop(pipeline: gst::Pipeline, settings: cli::Settings) -> Result<()> {
     main_loop.run();
 
     pipeline.set_state(gst::State::Null)?;
-    bus.remove_watch()?;
 
     Ok(())
 }

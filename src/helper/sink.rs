@@ -86,7 +86,7 @@ impl Sink {
             .map_err(|_| Error::LinkElements("capsfilter ! queue"))?;
 
         let queue_src_pad = queue.static_pad("src").unwrap();
-        let pad = gst::GhostPad::with_target(Some("src"), &queue_src_pad).unwrap();
+        let pad = gst::GhostPad::with_target(&queue_src_pad).unwrap();
 
         bin.add_pad(&pad).unwrap();
         pipeline.add(&bin).unwrap();
@@ -102,9 +102,7 @@ impl Sink {
         debug!("Setting pad {} active", name);
         pad.set_active(true).unwrap();
 
-        let bin_ref = pipeline.upcast_ref::<gst::Bin>();
-        gst::debug_bin_to_dot_file_with_ts(
-            bin_ref,
+        pipeline.debug_to_dot_file_with_ts(
             gst::DebugGraphDetails::all(),
             format!("opentok_wrapper_init_{}", name,),
         );
@@ -116,42 +114,43 @@ impl Sink {
         stream_type: String,
         receiver: Receiver<StreamMessageData>,
         pipeline: &gst::Pipeline,
-        opentoksink: &gst::Element,
+        _opentoksink: &gst::Element,
     ) {
         std::thread::spawn(clone!(
-            @weak pipeline,
-            @weak opentoksink
-        => move || {
-            loop {
-                match receiver.try_recv() {
-                    Ok(res) => match res {
-                        StreamMessageData::ShmSocketPathAdded(socket_path, caps, _pad_name) => {
-                            debug!("{} socket added: {}", stream_type, &socket_path);
-                            let caps = match stream_type.as_str() {
-                                "Audio" => Stream::Audio(caps),
-                                "Video" => Stream::Video(caps),
-                                _ => unreachable!(),
-                            };
-                            if let Err(err) = Sink::init_stream_pipeline(
-                                &pipeline,
-                                caps,
-                                socket_path,
-                            ) {
-                                eprintln!("{}", &err.to_string());
+            #[weak]
+            pipeline,
+            move || {
+                loop {
+                    match receiver.try_recv() {
+                        Ok(res) => match res {
+                            StreamMessageData::ShmSocketPathAdded(socket_path, caps, _pad_name) => {
+                                debug!("{} socket added: {}", stream_type, &socket_path);
+                                let caps = match stream_type.as_str() {
+                                    "Audio" => Stream::Audio(caps),
+                                    "Video" => Stream::Video(caps),
+                                    _ => unreachable!(),
+                                };
+                                if let Err(err) =
+                                    Sink::init_stream_pipeline(&pipeline, caps, socket_path)
+                                {
+                                    eprintln!("{}", &err.to_string());
+                                }
                             }
+                            StreamMessageData::ShmSocketPathRemoved(socket_path, _ipc_sender) => {
+                                debug!("{} socket removed: {}", stream_type, &socket_path);
+                                // TODO
+                            }
+                            _ => {}
                         },
-                        StreamMessageData::ShmSocketPathRemoved(socket_path, _ipc_sender) => {
-                            debug!("{} socket removed: {}", stream_type, &socket_path);
-                            // TODO
-                        },
-                        _ => {}
-                    },
-                    Err(_) => {
-                        std::thread::sleep(std::time::Duration::from_micros(RECEIVING_WAIT_USEC));
+                        Err(_) => {
+                            std::thread::sleep(std::time::Duration::from_micros(
+                                RECEIVING_WAIT_USEC,
+                            ));
+                        }
                     }
                 }
             }
-        }));
+        ));
     }
 
     pub fn new(

@@ -10,7 +10,7 @@
 use crate::common::{caps, Credentials, Error, IpcMessage, StreamMessage, StreamMessageData};
 
 use gst::glib::subclass::prelude::*;
-use gst::glib::{self, clone, ToValue};
+use gst::glib::{self, clone};
 use gst::prelude::*;
 use gst::subclass::prelude::*;
 use ipc_channel::ipc::{IpcOneShotServer, IpcReceiver, IpcSender};
@@ -206,7 +206,7 @@ impl OpenTokSinkRemote {
         element: &gst::Element,
         child_process: &Arc<Mutex<Option<Child>>>,
     ) {
-        gst::error!(CAT, obj: element, "{}", error);
+        gst::error!(CAT, obj = element, "{}", error);
         if let Some(mut child_process) = child_process.lock().unwrap().take() {
             let _ = child_process.interrupt();
         }
@@ -216,7 +216,7 @@ impl OpenTokSinkRemote {
         )) {
             gst::warning!(
                 CAT,
-                obj: element,
+                obj = element,
                 "Unable to post message on the bus. {}",
                 e
             );
@@ -224,7 +224,7 @@ impl OpenTokSinkRemote {
     }
 
     fn init(&self, api_key: &str, session_id: &str, token: &str) -> Result<(), Error> {
-        gst::debug!(CAT, imp: self, "Init");
+        gst::debug!(CAT, imp = self, "Init");
         // Spawn the child process and the auxiliary threads and hand over the
         // ipc server name.
         let (ipc_server, ipc_server_name): (IpcOneShotServer<IpcPeers>, String) =
@@ -233,7 +233,7 @@ impl OpenTokSinkRemote {
         self.launch_child_process(&ipc_server_name, api_key, session_id, token)?;
 
         let (_, (ipc_sender, ipc_receiver)) = ipc_server.accept().unwrap();
-        gst::debug!(CAT, imp: self, "Got IPC sender");
+        gst::debug!(CAT, imp = self, "Got IPC sender");
         *self.ipc_sender.lock().unwrap() = Some(ipc_sender);
 
         let child_process = self.child_process.clone();
@@ -243,73 +243,88 @@ impl OpenTokSinkRemote {
         let credentials = &self.credentials;
 
         thread::spawn(clone!(
-            @weak self as this,
-            @weak child_process,
-            @weak ipc_thread_running,
-            @weak credentials,
-        => move || {
-            gst::debug!(CAT, imp: this, "IPC thread running");
-            ipc_thread_running.store(true, Ordering::Relaxed);
-            let mut last_pong = std::time::Instant::now();
-            let mut last_ping_sent = std::time::Instant::now();
-            loop {
-                if !ipc_thread_running.load(Ordering::Relaxed) {
-                    break;
-                }
-                if last_ping_sent.elapsed().as_secs() > 1 {
-                    gst::log!(CAT, imp: this, "Sending PING");
-                    last_ping_sent = std::time::Instant::now();
-                    this.ipc_sender.lock().unwrap().as_ref().unwrap().send(IpcMessage::Ping).unwrap();
-                }
-                match ipc_receiver.try_recv() {
-                    Ok(message) => {
-                        gst::debug!(CAT, imp: this, "IPC message received: {:?}", message);
-                        match message {
-                            IpcMessage::Error(err) => {
+            #[weak(rename_to = this)]
+            self,
+            #[weak]
+            child_process,
+            #[weak]
+            ipc_thread_running,
+            #[weak]
+            credentials,
+            move || {
+                gst::debug!(CAT, imp = this, "IPC thread running");
+                ipc_thread_running.store(true, Ordering::Relaxed);
+                let mut last_pong = std::time::Instant::now();
+                let mut last_ping_sent = std::time::Instant::now();
+                loop {
+                    if !ipc_thread_running.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    if last_ping_sent.elapsed().as_secs() > 1 {
+                        gst::log!(CAT, imp = this, "Sending PING");
+                        last_ping_sent = std::time::Instant::now();
+                        this.ipc_sender
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .unwrap()
+                            .send(IpcMessage::Ping)
+                            .unwrap();
+                    }
+                    match ipc_receiver.try_recv() {
+                        Ok(message) => {
+                            gst::debug!(CAT, imp = this, "IPC message received: {:?}", message);
+                            match message {
+                                IpcMessage::Error(err) => {
+                                    OpenTokSinkRemote::critical_error(
+                                        &err,
+                                        this.obj().upcast_ref(),
+                                        &child_process,
+                                    );
+                                    break;
+                                }
+                                IpcMessage::Pong => {
+                                    gst::log!(CAT, "Got pong");
+                                    last_pong = std::time::Instant::now();
+                                }
+                                IpcMessage::PublishedStream(stream_id) => {
+                                    if let Some(signal_emitter) =
+                                        signal_emitter.lock().unwrap().as_ref()
+                                    {
+                                        *published_stream_id.lock().unwrap() =
+                                            Some(stream_id.clone());
+                                        let credentials = credentials.lock().unwrap().clone();
+                                        let url = format!(
+                                            "opentok://{}/{}?key={}&token={}",
+                                            credentials.session_id().unwrap(),
+                                            stream_id,
+                                            credentials.api_key().unwrap(),
+                                            credentials.token().unwrap()
+                                        );
+
+                                        signal_emitter.emit_published_stream(&stream_id, &url);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(_) => {
+                            std::thread::sleep(std::time::Duration::from_micros(10000));
+                            if last_pong.elapsed().as_secs() > 5 {
+                                gst::error!(CAT, "No pong for 5sec, posting error");
                                 OpenTokSinkRemote::critical_error(
-                                    &err,
+                                    "No pong for 5seconds",
                                     this.obj().upcast_ref(),
-                                    &child_process
+                                    &child_process,
                                 );
                                 break;
-                            },
-                            IpcMessage::Pong => {
-                                gst::log!(CAT, "Got pong");
-                                last_pong = std::time::Instant::now();
-                            },
-                            IpcMessage::PublishedStream(stream_id) => {
-                                if let Some(signal_emitter) = signal_emitter.lock().unwrap().as_ref() {
-                                    *published_stream_id.lock().unwrap() = Some(stream_id.clone());
-                                    let credentials = credentials.lock().unwrap().clone();
-                                    let url = format!("opentok://{}/{}?key={}&token={}",
-                                                      credentials.session_id().unwrap(),
-                                                      stream_id,
-                                                      credentials.api_key().unwrap(),
-                                                      credentials.token().unwrap()
-                                    );
-
-                                    signal_emitter.emit_published_stream(&stream_id, &url);
-                                }
-                            },
-                            _ => {},
-                        }
-                    },
-                    Err(_) => {
-                        std::thread::sleep(std::time::Duration::from_micros(10000));
-                        if last_pong.elapsed().as_secs() > 5 {
-                            gst::error!(CAT, "No pong for 5sec, posting error");
-                            OpenTokSinkRemote::critical_error(
-                                "No pong for 5seconds",
-                                this.obj().upcast_ref(),
-                                &child_process
-                            );
-                            break;
+                            }
                         }
                     }
                 }
+                gst::debug!(CAT, imp = this, "IPC thread exiting");
             }
-            gst::debug!(CAT, imp: this, "IPC thread exiting");
-        }));
+        ));
 
         Ok(())
     }
@@ -383,7 +398,7 @@ impl ObjectImpl for OpenTokSinkRemote {
     }
 
     fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
-        gst::trace!(CAT, imp: self, "Setting property {:?}", pspec.name());
+        gst::trace!(CAT, imp = self, "Setting property {:?}", pspec.name());
         let log_if_err_fn = |res| {
             if let Err(err) = res {
                 gst::error!(CAT, "Got error: {:?} while setting {}", err, pspec.name());
@@ -394,7 +409,7 @@ impl ObjectImpl for OpenTokSinkRemote {
             "location" => {
                 let location = value.get::<String>().expect("expected a string");
                 if let Err(e) = self.set_location(&location) {
-                    gst::error!(CAT, imp: self, "Failed to set location: {:?}", e)
+                    gst::error!(CAT, imp = self, "Failed to set location: {:?}", e)
                 }
             }
             "demo-room-uri" => {
@@ -494,7 +509,7 @@ impl ElementImpl for OpenTokSinkRemote {
     ) -> Option<gst::Pad> {
         let stream_type: StreamType = template.name_template().into();
 
-        gst::debug!(CAT, imp: self, "Requesting new pad {:?}", stream_type);
+        gst::debug!(CAT, imp = self, "Requesting new pad {:?}", stream_type);
 
         let setup_sink = || -> Result<gst::Pad, Error> {
             let mut socket = std::env::temp_dir();
@@ -528,7 +543,7 @@ impl ElementImpl for OpenTokSinkRemote {
 
             let queue_sink_pad = queue.static_pad("sink").unwrap();
             let bin_sink_pad =
-                gst::GhostPad::with_target(None, &queue_sink_pad).expect("bin sink with target");
+                gst::GhostPad::with_target(&queue_sink_pad).expect("bin sink with target");
             bin_sink_pad
                 .set_active(true)
                 .expect("activate bin sink pad");
@@ -541,7 +556,9 @@ impl ElementImpl for OpenTokSinkRemote {
                 .map_err(|_| Error::AddElement("bin sink pad"))?;
             bin.sync_state_with_parent().unwrap();
 
-            let pad = gst::GhostPad::from_template(template, Some(&format!("{}", &stream_type)));
+            let pad = gst::GhostPad::builder_from_template(template)
+                .name(&format!("{}", &stream_type))
+                .build();
             pad.set_target(Some(&bin_sink_pad))
                 .map_err(|_| Error::PadConstruction("shm_bin_sink", format!("{:?}", template)))?;
 
@@ -612,14 +629,14 @@ impl ElementImpl for OpenTokSinkRemote {
         match setup_sink() {
             Ok(pad) => Some(pad),
             Err(err) => {
-                gst::error!(CAT, imp: self, "{}", err);
+                gst::error!(CAT, imp = self, "{}", err);
                 None
             }
         }
     }
 
     fn release_pad(&self, pad: &gst::Pad) {
-        gst::debug!(CAT, imp: self, "Release pad {:?}", pad.name());
+        gst::debug!(CAT, imp = self, "Release pad {:?}", pad.name());
 
         let bin = match pad.name().as_str().into() {
             StreamType::Audio => self.audio_bin.lock().unwrap().take(),
@@ -642,7 +659,7 @@ impl ElementImpl for OpenTokSinkRemote {
         &self,
         transition: gst::StateChange,
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
-        gst::debug!(CAT, imp: self, "Changing state {:?}", transition);
+        gst::debug!(CAT, imp = self, "Changing state {:?}", transition);
 
         if transition == gst::StateChange::ReadyToPaused {
             async_std::task::block_on(
@@ -660,7 +677,7 @@ impl ElementImpl for OpenTokSinkRemote {
             if let Err(e) = self.maybe_init() {
                 gst::error!(
                     CAT,
-                    imp: self,
+                    imp = self,
                     "Failed to initialize OpenTok session: {:?}",
                     e
                 )
@@ -672,7 +689,7 @@ impl ElementImpl for OpenTokSinkRemote {
         }
 
         let success = self.parent_change_state(transition)?;
-        gst::debug!(CAT, imp: self, "State changed {:?}", transition);
+        gst::debug!(CAT, imp = self, "State changed {:?}", transition);
         Ok(success)
     }
 }

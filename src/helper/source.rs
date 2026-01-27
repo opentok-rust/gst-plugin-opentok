@@ -39,7 +39,7 @@ impl Source {
         queue.link(&sink)?;
 
         let queue_sink_pad = queue.static_pad("sink").unwrap();
-        let bin_sink_pad = gst::GhostPad::with_target(None, &queue_sink_pad)?;
+        let bin_sink_pad = gst::GhostPad::with_target(&queue_sink_pad)?;
         bin_sink_pad.set_active(true)?;
         bin.add_pad(&bin_sink_pad)?;
 
@@ -76,9 +76,7 @@ impl Source {
             pipeline.remove(bin).unwrap();
             debug!("bin {} removed", bin_name);
 
-            let bin_ref = pipeline.upcast_ref::<gst::Bin>();
-            gst::debug_bin_to_dot_file_with_ts(
-                bin_ref,
+            pipeline.debug_to_dot_file_with_ts(
                 gst::DebugGraphDetails::all(),
                 "opentoksrc_wrapper_sink_removed",
             );
@@ -110,106 +108,115 @@ impl Source {
         let ipc_sender = Arc::new(Mutex::new(ipc_sender));
 
         opentoksrc.connect_pad_added(clone!(
-            @weak pipeline,
-            @weak ipc_sender,
-        => move |_src, pad| {
-            debug!("Pad added to opentoksrc {:?}", pad.name());
+            #[weak]
+            pipeline,
+            #[weak]
+            ipc_sender,
+            move |_src, pad| {
+                debug!("Pad added to opentoksrc {:?}", pad.name());
 
-            let mut socket = std::env::temp_dir();
-            socket.push(format!("opentok-{}-socket", Uuid::new_v4()));
-            let socket_path = socket.to_str().unwrap().to_owned();
+                let mut socket = std::env::temp_dir();
+                socket.push(format!("opentok-{}-socket", Uuid::new_v4()));
+                let socket_path = socket.to_str().unwrap().to_owned();
 
-            let path_added = Source::on_pad_created(&pipeline, pad, &socket_path);
-            let prev_caps = Arc::new(Mutex::new(None));
-            pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |pad, info| {
-                if let Some(gst::PadProbeData::Event(ref event)) = info.data {
-                    if event.type_() == gst::EventType::Caps {
-                        let caps = pad.current_caps().unwrap();
-                        debug!("Notifying socket {} and caps {:?}", &socket_path, &caps);
-                        ipc_sender
-                            .lock()
-                            .unwrap()
-                            .send(match &path_added {
-                                Ok(()) => {
-                                    let pad_name = pad.name().to_string();
-                                    let msg = if !prev_caps.lock().unwrap().is_none() {
-                                        IpcMessage::Stream(
-                                            if pad_name.contains("audio") {
-                                                StreamMessage::Audio(StreamMessageData::CapsChanged(
-                                                    caps.to_string(),
-                                                    pad_name,
-                                                ))
+                let path_added = Source::on_pad_created(&pipeline, pad, &socket_path);
+                let prev_caps = Arc::new(Mutex::new(None));
+                pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |pad, info| {
+                    if let Some(gst::PadProbeData::Event(ref event)) = info.data {
+                        if event.type_() == gst::EventType::Caps {
+                            let caps = pad.current_caps().unwrap();
+                            debug!("Notifying socket {} and caps {:?}", &socket_path, &caps);
+                            ipc_sender
+                                .lock()
+                                .unwrap()
+                                .send(match &path_added {
+                                    Ok(()) => {
+                                        let pad_name = pad.name().to_string();
+                                        let msg = if !prev_caps.lock().unwrap().is_none() {
+                                            IpcMessage::Stream(if pad_name.contains("audio") {
+                                                StreamMessage::Audio(
+                                                    StreamMessageData::CapsChanged(
+                                                        caps.to_string(),
+                                                        pad_name,
+                                                    ),
+                                                )
                                             } else {
-                                                StreamMessage::Video(StreamMessageData::CapsChanged(
-                                                    caps.to_string(),
-                                                    pad_name,
-                                                ))
-                                            }
-                                        )
-                                    } else {
-                                        IpcMessage::Stream(
-                                            if pad_name.contains("audio") {
-                                                StreamMessage::Audio(StreamMessageData::ShmSocketPathAdded(
-                                                    socket_path.clone(),
-                                                    caps.to_string(),
-                                                    pad_name,
-                                                ))
+                                                StreamMessage::Video(
+                                                    StreamMessageData::CapsChanged(
+                                                        caps.to_string(),
+                                                        pad_name,
+                                                    ),
+                                                )
+                                            })
+                                        } else {
+                                            IpcMessage::Stream(if pad_name.contains("audio") {
+                                                StreamMessage::Audio(
+                                                    StreamMessageData::ShmSocketPathAdded(
+                                                        socket_path.clone(),
+                                                        caps.to_string(),
+                                                        pad_name,
+                                                    ),
+                                                )
                                             } else {
-                                                StreamMessage::Video(StreamMessageData::ShmSocketPathAdded(
-                                                    socket_path.clone(),
-                                                    caps.to_string(),
-                                                    pad_name,
-                                                ))
-                                            }
-                                        )
-                                    };
-                                    *prev_caps.lock().unwrap() = Some(caps.to_string());
-                                    msg
-                                }
-                                Err(err) => IpcMessage::Error(err.to_string()),
-                            })
-                            .unwrap();
-                    }
-                }
-                gst::PadProbeReturn::Ok
-            });
-
-            pipeline.set_state(gst::State::Playing).unwrap();
-        }));
-
-        opentoksrc.connect_pad_removed(clone!(
-            @weak pipeline,
-            @weak ipc_sender
-        => move |_, pad| {
-            debug!("Pad removed from opentoksrc: {:?}", pad.name());
-            debug!("Notifying the other side");
-            let (sender, receiver) = ipc::channel().unwrap();
-            let _ = ipc_sender
-                .lock()
-                .unwrap()
-                .send(match Source::socket_path_for_pad(&pipeline, pad) {
-                    Ok(socket_path) => IpcMessage::Stream(
-                        if pad.name().to_string().contains("audio") {
-                            StreamMessage::Audio(StreamMessageData::ShmSocketPathRemoved(
-                                socket_path,
-                                sender,
-                            ))
-                        } else {
-                            StreamMessage::Video(StreamMessageData::ShmSocketPathRemoved(
-                                socket_path,
-                                sender,
-                            ))
+                                                StreamMessage::Video(
+                                                    StreamMessageData::ShmSocketPathAdded(
+                                                        socket_path.clone(),
+                                                        caps.to_string(),
+                                                        pad_name,
+                                                    ),
+                                                )
+                                            })
+                                        };
+                                        *prev_caps.lock().unwrap() = Some(caps.to_string());
+                                        msg
+                                    }
+                                    Err(err) => IpcMessage::Error(err.to_string()),
+                                })
+                                .unwrap();
                         }
-                    ),
-                    Err(err) => IpcMessage::Error(err.to_string()),
+                    }
+                    gst::PadProbeReturn::Ok
                 });
 
-            // Wait for the main process to tell us that the shmsrc has been removed and
-            // hence we are good to remove the corresponding shmsink.
-            if receiver.recv().is_ok() {
-                Source::cleanup_pad(&pipeline, pad);
+                pipeline.set_state(gst::State::Playing).unwrap();
             }
-        }));
+        ));
+
+        opentoksrc.connect_pad_removed(clone!(
+            #[weak]
+            pipeline,
+            #[weak]
+            ipc_sender,
+            move |_, pad| {
+                debug!("Pad removed from opentoksrc: {:?}", pad.name());
+                debug!("Notifying the other side");
+                let (sender, receiver) = ipc::channel().unwrap();
+                let _ = ipc_sender.lock().unwrap().send(
+                    match Source::socket_path_for_pad(&pipeline, pad) {
+                        Ok(socket_path) => {
+                            IpcMessage::Stream(if pad.name().to_string().contains("audio") {
+                                StreamMessage::Audio(StreamMessageData::ShmSocketPathRemoved(
+                                    socket_path,
+                                    sender,
+                                ))
+                            } else {
+                                StreamMessage::Video(StreamMessageData::ShmSocketPathRemoved(
+                                    socket_path,
+                                    sender,
+                                ))
+                            })
+                        }
+                        Err(err) => IpcMessage::Error(err.to_string()),
+                    },
+                );
+
+                // Wait for the main process to tell us that the shmsrc has been removed and
+                // hence we are good to remove the corresponding shmsink.
+                if receiver.recv().is_ok() {
+                    Source::cleanup_pad(&pipeline, pad);
+                }
+            }
+        ));
 
         Self { ipc_sender }
     }
