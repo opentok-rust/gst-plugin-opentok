@@ -22,7 +22,7 @@ pub fn register(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
     gst::Element::register(
         Some(plugin),
         "opentoksrc-remote",
-        gst::Rank::None,
+        gst::Rank::NONE,
         OpenTokSrcRemote::static_type(),
     )
 }
