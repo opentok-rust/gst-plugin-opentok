@@ -19,11 +19,11 @@ use gst::prelude::*;
 mod cli;
 
 #[derive(Debug, Display, Error)]
-#[display(fmt = "Missing element {}", _0)]
+#[display("Missing element {}", _0)]
 struct MissingElement(#[error(not(source))] &'static str);
 
 #[derive(Debug, Display, Error)]
-#[display(fmt = "Received error from {}: {} (debug: {:?})", src, error, debug)]
+#[display("Received error from {}: {} (debug: {:?})", src, error, debug)]
 struct ErrorMessage {
     src: String,
     error: String,
