@@ -258,13 +258,12 @@ impl OpenTokSrcRemote {
         if let Some(mut child_process) = child_process.lock().unwrap().take() {
             let _ = child_process.interrupt();
         }
-        if let Err(err)  = element
-            .post_message(gst::message::Error::new(
-                gst::CoreError::Failed,
-                &format!("Child process error {}", error),
-            )) {
-                gst::error!(CAT, "Could not post error message: {err:?}");
-            }
+        if let Err(err) = element.post_message(gst::message::Error::new(
+            gst::CoreError::Failed,
+            &format!("Child process error {}", error),
+        )) {
+            gst::error!(CAT, "Could not post error message: {err:?}");
+        }
     }
 
     fn init(&self) -> Result<(), Error> {
