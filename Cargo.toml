@@ -56,7 +56,7 @@ ipc-channel = "0.20.0"
 log = "0.4.14"
 once_cell = "1.0"
 # FIXME: Update to upstream when it is released
-opentok = { git = "https://github.com/sdroege/opentok-rs.git", rev = "b396c0189c0aeca156a16693b2e67b9990fa8432" }
+opentok = { git = "https://github.com/opentok-rust/opentok-rs.git", rev = "f50a6c68d8cf9d19d1115fff5cd276cc1c6f2426" }
 serde = "1.0.130"
 signal-child = "1.0.3"
 signal-hook = "0.4"
